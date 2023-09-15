@@ -20,15 +20,10 @@ const (
 	IOT_LOG_CFG_PUSH = "iotLogCfgPush"
 	SET_IOT_GW_CFG   = "setIotGwCfg"
 	SET_NET_CFG      = "setNetCfg"
-	SET_IOT_NODE_CFG = "setIotNodeCfg"
-	SET_IOT_MOD_CFG  = "setIotModCfg"
 
 	// 上行devOption
 	DEV_UPGRADE_PROGRESS_UP = "devUpgradeProgressUp"
 
 	// 下行devOption
 	DEV_UPGRADE = "devUpgrade"
-
-	// propertyUp
-	PROPERTY_UP = "propertyUp"
 )

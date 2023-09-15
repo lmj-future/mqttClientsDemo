@@ -5,15 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	mathRand "math/rand"
+	"log"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/lmj/mqtt-clients-demo/config"
-	"github.com/lmj/mqtt-clients-demo/logger"
-	"github.com/pborman/uuid"
+	"demo/config"
 )
 
 func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
@@ -154,13 +152,13 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 		ip := net.IP(randomIP)
 		randomGMAC := make([]byte, 8)
 		rand.Read(randomGMAC)
-		nodeModel := config.PRODUCT_NAME
+		nodeModel := "T320M"
 		nodeVersion := "R1268"
 		modModel := "T301-R"
 		modVersion := "R1245"
 		if downMsg.DevModel != "" {
 			switch downMsg.DevModel {
-			case config.PRODUCT_NAME:
+			case "T320M":
 				nodeModel = downMsg.DevModel
 				nodeVersion = downMsg.Version
 			case "T301-R":
@@ -209,7 +207,7 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 			{
 				CanID:      0,
 				NodeSN:     devSN,
-				NodeModel:  config.PRODUCT_NAME,
+				NodeModel:  "T320M",
 				NodeStatus: 5,
 				NodeAging:  0,
 				ModStatusList: []ModStatus{
@@ -232,10 +230,10 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 		}
 	case NODE_TOPO_INFO_UP:
 		upMsg.NodeTopoInfoList = []NodeTopoInfo{
-			{
+			{  
 				CanID:     0,
 				NodeSN:    devSN,
-				NodeModel: config.PRODUCT_NAME,
+				NodeModel: "T320M",
 				ModTopoInfoList: []ModTopoInfo{
 					{
 						PortID:    0,
@@ -254,184 +252,66 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 		}
 	}
 	upMsgByte, _ := json.Marshal(upMsg)
+	// log.Println("upMsg: ", string(upMsgByte))
 	return upMsgByte
 }
 
-func upRawWhenConnectByT320(clientInfo MqttClientInfo) {
-	topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, clientInfo.DevSN)
-	<-time.After(time.Second)
-	payload := EncUpMsg(DEV_CONNECT_STATUS, clientInfo.DevSN, DownMsg{})
-	if clientInfo.Client.IsConnectionOpen() {
-		if config.LOG_MQTT_PUBLISH_ENABLE {
-			logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
-		}
-		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
-		<-time.After(time.Microsecond * 10)
-	}
-	if clientInfo.Client.IsConnectionOpen() {
-		payload = EncUpMsg(IOT_VER_INFO_GET, clientInfo.DevSN, DownMsg{})
-		if config.LOG_MQTT_PUBLISH_ENABLE {
-			logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
-		}
-		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
-		<-time.After(time.Microsecond * 2000)
-	}
-	if clientInfo.Client.IsConnectionOpen() {
-		payload = EncUpMsg(BASIC_INFO_UP, clientInfo.DevSN, DownMsg{})
-		if config.LOG_MQTT_PUBLISH_ENABLE {
-			logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
-		}
-		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
-		<-time.After(time.Microsecond * 3000)
-	}
-	if clientInfo.Client.IsConnectionOpen() {
-		payload = EncUpMsg(STATUS_UP, clientInfo.DevSN, DownMsg{})
-		if config.LOG_MQTT_PUBLISH_ENABLE {
-			logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
-		}
-		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
-	}
-}
-func upRawWhenConnectByMqtt0001(clientInfo MqttClientInfo) {
-	// devSN := strings.Replace(clientInfo.ClientId, "&v5", "", 1)
-	// topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, devSN)
-
-	// do nothing
-}
-
 func UpRawWhenConnect(clientInfo MqttClientInfo) {
-	switch config.PRODUCT_NAME {
-	case "T320M", "T320MX", "T320MX-U":
-		upRawWhenConnectByT320(clientInfo)
-	case "示例产品-mqtt":
-		upRawWhenConnectByMqtt0001(clientInfo)
+	devSN := strings.Replace(clientInfo.ClientId, config.PRODUCT_KEY+"&", "", 1)
+	topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, devSN)
+	<-time.After(time.Second)
+	payload := EncUpMsg(DEV_CONNECT_STATUS, devSN, DownMsg{})
+	if clientInfo.Client.IsConnectionOpen() {
+		if config.MQTT_PUBLISH_ENABLE {
+			log.Printf("发布topic为 %s 的消息: %s", topic, string(payload))
+		}
+		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
+		<-time.After(time.Microsecond * 500)
+	}
+	if clientInfo.Client.IsConnectionOpen() {
+		payload = EncUpMsg(IOT_VER_INFO_GET, devSN, DownMsg{})
+		if config.MQTT_PUBLISH_ENABLE {
+			log.Printf("发布topic为 %s 的消息: %s", topic, string(payload))
+		}
+		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
+		<-time.After(time.Microsecond * 100)
+	}
+	if clientInfo.Client.IsConnectionOpen() {
+		payload = EncUpMsg(BASIC_INFO_UP, devSN, DownMsg{})
+		if config.MQTT_PUBLISH_ENABLE {
+			log.Printf("发布topic为 %s 的消息: %s", topic, string(payload))
+		}
+		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
+		<-time.After(time.Microsecond * 500)
+	}
+	if clientInfo.Client.IsConnectionOpen() {
+		payload = EncUpMsg(STATUS_UP, devSN, DownMsg{})
+		if config.MQTT_PUBLISH_ENABLE {
+			log.Printf("发布topic为 %s 的消息: %s", topic, string(payload))
+		}
+		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
 	}
 }
 
-func upRawAfterConnectByT320(clientInfo MqttClientInfo, timeSleep time.Duration) {
-	topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, clientInfo.DevSN)
-	payload := EncUpMsg(NODE_TOPO_INFO_UP, clientInfo.DevSN, DownMsg{})
+func UpRawAfterConnect(clientInfo MqttClientInfo, timeSleep time.Duration) {
+	devSN := strings.Replace(clientInfo.ClientId, config.PRODUCT_KEY+"&", "", 1)
+	topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, devSN)
+	payload := EncUpMsg(NODE_TOPO_INFO_UP, devSN, DownMsg{})
 	if clientInfo.Client.IsConnectionOpen() {
-		if config.LOG_MQTT_PUBLISH_ENABLE {
-			logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
+		if config.MQTT_PUBLISH_ENABLE {
+			log.Printf("发布topic为 %s 的消息: %s", topic, string(payload))
 		}
 		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
 		<-time.After(timeSleep / time.Duration(config.PPS))
 	}
 	for i := 1; i < config.PPS; i++ {
 		if clientInfo.Client.IsConnectionOpen() {
-			payload = EncUpMsg(IOT_GW_CFG_SYNC, clientInfo.DevSN, DownMsg{})
-			if config.LOG_MQTT_PUBLISH_ENABLE {
-				logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
+			payload = EncUpMsg(IOT_GW_CFG_SYNC, devSN, DownMsg{})
+			if config.MQTT_PUBLISH_ENABLE {
+				log.Printf("发布topic为 %s 的消息: %s", topic, string(payload))
 			}
 			clientInfo.Client.Publish(topic, 0x00, false, string(payload))
 			<-time.After(timeSleep / time.Duration(config.PPS))
 		}
-	}
-}
-
-func pubProperty(params map[string]interface{}, clientInfo MqttClientInfo, topic string, timeSleep time.Duration) {
-	var msg map[string]interface{}
-	json.Unmarshal([]byte(`{"msgid":"","params":{}}`), &msg)
-	msg["msgid"] = strconv.Itoa(Counter.IncrementAndGet(clientInfo.DevSN))
-	msg["params"] = params
-	payload, _ := json.Marshal(msg)
-	if config.LOG_MQTT_PUBLISH_ENABLE {
-		logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
-	}
-	if clientInfo.Client.IsConnectionOpen() {
-		clientInfo.Client.Publish(topic, 0x00, false, string(payload))
-	}
-	<-time.After(timeSleep / time.Duration(config.PPS))
-}
-func upRawAfterConnectByMqtt0001(clientInfo MqttClientInfo, timeSleep time.Duration) {
-	if config.PROPERTY_UP_ENABLE {
-		topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, clientInfo.DevSN)
-		// 采用随机种子，对以下数据生成随机值
-		mathRand.New(mathRand.NewSource(time.Now().UnixNano()))
-		if config.BOOLKey {
-			var params map[string]interface{} = map[string]interface{}{
-				"BOOLKey": map[string]bool{"value": mathRand.Intn(2) == 1},
-			}
-			pubProperty(params, clientInfo, topic, timeSleep)
-		}
-		if config.DoubleKey {
-			var params map[string]interface{} = map[string]interface{}{
-				"DoubleKey": map[string]float64{"value": float64(1+mathRand.Intn(254)) + mathRand.Float64()},
-			}
-			pubProperty(params, clientInfo, topic, timeSleep)
-		}
-		if config.LongKey {
-			var params map[string]interface{} = map[string]interface{}{
-				"LongKey": map[string]int64{"value": int64(1 + mathRand.Intn(254))},
-			}
-			pubProperty(params, clientInfo, topic, timeSleep)
-		}
-		if config.StringKey {
-			var params map[string]interface{} = map[string]interface{}{
-				"StringKey": map[string]string{"value": uuid.NewRandom().String()},
-			}
-			pubProperty(params, clientInfo, topic, timeSleep)
-		}
-		if config.PowerSwitch {
-			var params map[string]interface{} = map[string]interface{}{
-				"PowerSwitch": map[string]bool{"value": mathRand.Intn(2) == 1},
-			}
-			pubProperty(params, clientInfo, topic, timeSleep)
-		}
-		if config.CustomKey {
-			var customValue map[string]interface{}
-			json.Unmarshal([]byte(config.CustomValue), &customValue)
-			var params map[string]interface{} = make(map[string]interface{})
-			for k, v := range customValue {
-				params[k] = map[string]interface{}{"value": v}
-			}
-			pubProperty(params, clientInfo, topic, timeSleep)
-		}
-	}
-}
-func getPubTopic(devSN string) []string {
-	var pubTopic []string
-	for _, v := range config.PUB_TOPIC {
-		if v != "" {
-			if strings.Contains(v, "{devSN}") {
-				v = strings.ReplaceAll(v, "{devSN}", devSN)
-			}
-			if strings.Contains(v, "{devKey}") {
-				v = strings.ReplaceAll(v, "{devKey}", config.DEVICE_KEY)
-			}
-			pubTopic = append(pubTopic, v)
-		}
-	}
-	return pubTopic
-}
-func upRawAfterConnectByCustom(clientInfo MqttClientInfo, timeSleep time.Duration) {
-	if config.PROPERTY_UP_ENABLE {
-		topic := getPubTopic(clientInfo.DevSN)[0]
-		if config.CustomKey {
-			var customValue map[string]interface{}
-			json.Unmarshal([]byte(config.CustomValue), &customValue)
-			payload, _ := json.Marshal(customValue)
-			for i := 0; i < config.PPS; i++ {
-				if config.LOG_MQTT_PUBLISH_ENABLE {
-					logger.Log.Infof("发布topic为 %s 的消息: %s", topic, string(payload))
-				}
-				if clientInfo.Client.IsConnectionOpen() {
-					clientInfo.Client.Publish(topic, 0x00, false, string(payload))
-				}
-				<-time.After(timeSleep / time.Duration(config.PPS))
-			}
-		}
-	}
-}
-
-func UpRawAfterConnect(clientInfo MqttClientInfo, timeSleep time.Duration) {
-	switch config.PRODUCT_NAME {
-	case "T320M", "T320MX", "T320MX-U":
-		upRawAfterConnectByT320(clientInfo, timeSleep)
-	case "示例产品-mqtt":
-		upRawAfterConnectByMqtt0001(clientInfo, timeSleep)
-	case "自定义":
-		upRawAfterConnectByCustom(clientInfo, timeSleep)
 	}
 }
