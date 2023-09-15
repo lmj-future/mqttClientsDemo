@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -19,7 +18,7 @@ import (
 	"demo/udpclient"
 )
 
-//初始化
+// 初始化
 func init() {
 	config.Init()
 	mqttclient.Init()    //初始化的时候开一个map锁
@@ -164,8 +163,8 @@ func checkAndDisplay() {
 	}
 }
 
-//提取mqtt的对应引用，释放mqttclient资源
-//取消订阅并关闭来连接
+// 提取mqtt的对应引用，释放mqttclient资源
+// 取消订阅并关闭来连接
 func exit() {
 	log.Println("进程将在销毁所有资源后退出！！！请等待...")
 	<-time.After(3 * time.Second)
@@ -193,11 +192,11 @@ func exit() {
 	<-time.After(1 * time.Second)
 	clientMapUDP := cmap.New()
 	for j := range udpclient.ClientMapUDP.IterBuffered() {
-		clientMap.Set(j.Key,j.Val)
+		clientMap.Set(j.Key, j.Val)
 	}
 	udpclient.ClientMapUDP.Clear()
 	wg.Add(clientMapUDP.Count())
-	for  k := range clientMapUDP.IterBuffered() {
+	for k := range clientMapUDP.IterBuffered() {
 		c := k.Val.(udpclient.Client)
 		c.Connection.Close()
 		log.Println("进程退出,关闭UDP客户端连接: ", k.Key)
@@ -209,12 +208,15 @@ func exit() {
 	os.Exit(0)
 }
 
-//主程序
+// 主程序
 func main() {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	signal.Ignore(syscall.SIGPIPE)
+
+	// by luminjie
+	// TODO: 将MQTT与UDP集成起来，当MQTT数据交互完成后，进行UDP程序
 	udpclient.StartUDP()
 	// 1、先进行MQTT连接
 	// mqttConnectFirst(sig)
@@ -231,8 +233,6 @@ func main() {
 
 	// // 5、展示一些数据
 	// go checkAndDisplay()
-
-	
 
 	<-sig
 	exit()

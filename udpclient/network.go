@@ -1,4 +1,3 @@
-
 package udpclient
 
 import (
@@ -15,7 +14,7 @@ import (
 	"github.com/coocood/freecache"
 )
 
-//保活信息记录
+// 保活信息记录
 var MsgCheckTimeID = &sync.Map{}
 var MsgForEvery = &sync.Map{}
 
@@ -64,8 +63,8 @@ func (c *Client) readFromSocket(buffersize int) {
 	}
 }
 
-//回了ack的话就更新缓存中的时间
-//修改一下其中的序列号即可重新发送
+// 回了ack的话就更新缓存中的时间
+// 修改一下其中的序列号即可重新发送
 func (c *Client) processPackets() {
 	for pack := range c.packets {
 		log.Warnln("Receive from ", pack.returnAddress.IP.String(), ":", pack.returnAddress.Port, " Starting proc msg Content is :", hex.EncodeToString(pack.bytes))
@@ -83,12 +82,16 @@ func (c *Client) processPackets() {
 	}
 }
 
-//产生设备
+// 产生设备
 func GenMode(nums int) []TerminalInfo {
 	TnfGroup := make([]TerminalInfo, nums)
 	for i := 0; i < nums; i++ {
+		// by luminjie
+		// TODO: 这里不要模拟随机设备，设备需要在平台上真实存在，否则模拟的没有意义，与MQTT联动起来
 		TnfGroup[i] = TerminalInfo{}
 		TnfGroup[i].FirstAddr = getRand(40, false) //模拟获取设备
+		// by luminjie
+		// Q: 这里sleep的意义是？随机序列影响？
 		time.Sleep(time.Microsecond * 50)
 		TnfGroup[i].ThirdAddr = getRand(12, false)
 		time.Sleep(time.Microsecond * 50)
@@ -105,7 +108,6 @@ func GenMode(nums int) []TerminalInfo {
 	return TnfGroup
 }
 
-
 /**
  * @Descrption: 发送消息，主动触发机制，通道触发
  * @param {TerminalInfo} Terminal
@@ -119,6 +121,8 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 	)
 	for SN := range c.msgType {
 		if SN != "0000" { //非首轮消息停5s
+			// by luminjie
+			// TODO: 保活定15秒，我们UDP的保活一般都定义成15秒
 			time.Sleep(5 * time.Second)
 		}
 		preSend := encKeepAliveMsg(DataMsgType.UpMsg.KeepAliveEvent, Terminal, SN)
@@ -143,7 +147,7 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 	}
 }
 
-//保活消息重发,重发以后就走到keepalive环节了，如果也没有
+// 保活消息重发,重发以后就走到keepalive环节了，如果也没有
 func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, SN, key string) {
 	if resendTime == 4 {
 		return
@@ -154,8 +158,10 @@ func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, SN, key string)
 	fcache, _ := MsgForEvery.Load(c.clientname)
 	_, err := fcache.(*freecache.Cache).Get([]byte(key))
 	if err == nil { //重发
+		// by luminjie
+		// ISSUE: 这里的重发报文是否可以不用重新封装，沿用之前的报文就可以？
 		preSend := encKeepAliveMsg(DataMsgType.UpMsg.KeepAliveEvent, Terminal, SN) //封装消息
-		log.Warnln("Devui: ", key, "Generate ReSend Message", resendTime ,"Times")
+		log.Warnln("Devui: ", key, "Generate ReSend Message", resendTime, "Times")
 		byteOfPresend, errIn := hex.DecodeString(preSend)
 		if errIn != nil {
 			log.Errorln("ReDecode is Fail, Illegal Message!")

@@ -1,4 +1,3 @@
-
 package udpclient
 
 import (
@@ -12,8 +11,6 @@ import (
 )
 
 var ClientMapUDP cmap.ConcurrentMap
-
- 
 
 var Opts struct {
 	ServerAddress string `short:"s" long:"serveraddress" default:"33.33.33.244:3501" description:"The Server's Address"`
@@ -45,7 +42,7 @@ func StartUDP() {
 		go sendMsg(v, v.client)
 		go v.client.readFromSocket(Opts.Buffer)
 		go v.client.processPackets()
-		v.client.msgType <- "0000"  //触发
+		v.client.msgType <- "0000" //触发
 	}
 
 	//间隔检测内存使用情况

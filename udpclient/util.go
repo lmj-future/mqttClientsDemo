@@ -1,4 +1,3 @@
-
 package udpclient
 
 import (
@@ -33,8 +32,8 @@ func sendLeave(msgType string) {
 
 }
 
-//当前消息,key表示三级地址的串联，中间需要配置
-//只需要管模拟和记录即可
+// 当前消息,key表示三级地址的串联，中间需要配置
+// 只需要管模拟和记录即可
 func encKeepAliveMsg(msgType string, dev TerminalInfo, sn string) string {
 	var msg strings.Builder
 	msg.WriteString(Opts.UdpVer) //消息版本
@@ -71,9 +70,7 @@ func encKeepAliveMsg(msgType string, dev TerminalInfo, sn string) string {
 	return message
 }
 
-
-
-//生成完整消息，载入消息长度
+// 生成完整消息，载入消息长度
 func generateLenOfMsg(msg strings.Builder) string {
 	sz := len(msg.String()) + 8 //包含crc
 	szOfHex := strconv.FormatInt(int64(sz)/2, 16)
@@ -85,13 +82,13 @@ func generateLenOfMsg(msg strings.Builder) string {
 	return res
 }
 
-//验证回复消息
+// 验证回复消息
 func Check(msg []byte) bool {
 	return CRC(append(msg[:0:0], msg[:len(msg)-2]...)) ==
 		hex.EncodeToString(append(msg[:0:0], msg[len(msg)-2:]...))
 }
 
-//随机生成序列
+// 随机生成序列
 func getRand(length int, isDigit bool) string {
 	rand.Seed(time.Now().UnixNano())
 	if length < 1 {
@@ -114,8 +111,10 @@ func getRand(length int, isDigit bool) string {
 	return rchar
 }
 
-//检测保活信息的处理
+// 检测保活信息的处理
 func procKeepAliveMsgFreeCache(key string, t int, clientName string) {
+	// by luminjie
+	// TODO: 这里做一下如下处理：当三次未收到保活ack时，需要将udp通道断开5分钟，5分钟后重连udp
 	var timerID = time.NewTimer(time.Duration(t*3+3) * time.Second)
 	MsgCheckTimeID.Store(key, timerID)
 	<-timerID.C
@@ -136,7 +135,7 @@ func procKeepAliveMsgFreeCache(key string, t int, clientName string) {
 	}
 }
 
-//获取对应客户端中的key消息缓存情况
+// 获取对应客户端中的key消息缓存情况
 func KeepAliveTimerFreeCacheGet(key, client string) (int64, error) {
 	var updateTime int64
 	var err error
@@ -152,7 +151,7 @@ func (T *TerminalInfo) toString() {
 	fmt.Println("firstAddr is : ", T.FirstAddr, "secondAddr is : ", T.SecondAddr, "thirdAddr is :", T.ThirdAddr)
 }
 
-//real自增后转化成sz长度的字符串
+// real自增后转化成sz长度的字符串
 func makeHex(real string, sz int) string {
 	SN, _ := strconv.ParseInt(real, 16, 8)
 	SN++
