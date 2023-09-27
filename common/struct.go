@@ -3,7 +3,7 @@ package common
 import mqtt "github.com/eclipse/paho.mqtt.golang"
 
 type MqttClientInfo struct {
-	ClientId    string
+	DevSN       string
 	Client      mqtt.Client
 	Connectting bool
 }
@@ -99,17 +99,19 @@ type ProgressMsg struct {
 }
 
 type DownMsg struct {
-	DevSN       string       `json:"devSN,omitempty"`
-	Method      string       `json:"method,omitempty"`
-	DevOption   string       `json:"devOption,omitempty"`
-	Maintenance string       `json:"maintenance,omitempty"`
-	DevMsgID    *int         `json:"devMsgID"`
-	MessageID   *int         `json:"messageID"`
-	Config      *interface{} `json:"config,omitempty"`
-	LogConfig   *interface{} `json:"logConfig,omitempty"`
-	Version     string       `json:"version,omitempty"`
-	WifiConfig  *interface{} `json:"wifiConfig,omitempty"`
-	GroupConfig *interface{} `json:"groupConfig,omitempty"`
+	DevSN        string       `json:"devSN,omitempty"`
+	Method       string       `json:"method,omitempty"`
+	DevOption    string       `json:"devOption,omitempty"`
+	Maintenance  string       `json:"maintenance,omitempty"`
+	DevMsgID     *int         `json:"devMsgID"`
+	MessageID    *int         `json:"messageID"`
+	Config       *interface{} `json:"config,omitempty"`
+	LogConfig    *interface{} `json:"logConfig,omitempty"`
+	Version      string       `json:"version,omitempty"`
+	WifiConfig   *interface{} `json:"wifiConfig,omitempty"`
+	GroupConfig  *interface{} `json:"groupConfig,omitempty"`
+	NodeConfig   *interface{} `json:"nodeConfig,omitempty"`
+	ModuleConfig *interface{} `json:"moduleConfig,omitempty"`
 
 	DevType   *int   `json:"devType"`
 	DevModel  string `json:"devModel,omitempty"`
@@ -133,24 +135,49 @@ type UpgradeMsg struct {
 	Method string      `json:"method,omitempty"`
 }
 
-type ConfigRsult struct {
+type ConfigResult struct {
 	Result string `json:"result,omitempty"`
 }
 
+type NodeConfigResult struct {
+	CanID  int    `json:"canID"`
+	NodeSN string `json:"nodeSN,omitempty"`
+	Result string `json:"result,omitempty"`
+}
+
+type ModConfigResult struct {
+	PortID int    `json:"portID"`
+	Result string `json:"result,omitempty"`
+}
+
+type ModuleConfigResult struct {
+	ModuleConfigList []ModConfigResult `json:"moduleConfigList,omitempty"`
+	CanID            int               `json:"canID"`
+	NodeSN           string            `json:"nodeSN,omitempty"`
+}
+
 type DownMsgRsp struct {
-	DevSN       string      `json:"devSN,omitempty"`
-	Method      string      `json:"method,omitempty"`
-	DevOption   string      `json:"devOption,omitempty"`
-	Maintenance string      `json:"maintenance,omitempty"`
-	DevMsgID    int         `json:"devMsgID"`
-	MessageID   int         `json:"messageID"`
-	Result      string      `json:"result,omitempty"`
-	RespCode    int         `json:"respCode"`
-	Config      ConfigRsult `json:"config,omitempty"`
-	LogConfig   ConfigRsult `json:"logConfig,omitempty"`
-	Version     string      `json:"version,omitempty"`
-	WifiConfig  ConfigRsult `json:"wifiConfig,omitempty"`
-	GroupConfig ConfigRsult `json:"groupConfig,omitempty"`
+	DevSN        string               `json:"devSN,omitempty"`
+	Method       string               `json:"method,omitempty"`
+	DevOption    string               `json:"devOption,omitempty"`
+	Maintenance  string               `json:"maintenance,omitempty"`
+	DevMsgID     int                  `json:"devMsgID"`
+	MessageID    int                  `json:"messageID"`
+	Result       string               `json:"result,omitempty"`
+	RespCode     int                  `json:"respCode"`
+	Config       ConfigResult         `json:"config,omitempty"`
+	LogConfig    ConfigResult         `json:"logConfig,omitempty"`
+	Version      string               `json:"version,omitempty"`
+	WifiConfig   ConfigResult         `json:"wifiConfig,omitempty"`
+	GroupConfig  ConfigResult         `json:"groupConfig,omitempty"`
+	NodeConfig   []NodeConfigResult   `json:"nodeConfig,omitempty"`
+	ModuleConfig []ModuleConfigResult `json:"moduleConfig,omitempty"`
 
 	DevModel string `json:"devModel,omitempty"`
+}
+
+// mqtt0001
+type PropertyUp struct {
+	MsgId  string      `json:"msgid"`
+	Params interface{} `json:"params"`
 }

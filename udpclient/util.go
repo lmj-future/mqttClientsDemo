@@ -2,50 +2,69 @@ package udpclient
 
 import (
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"math/rand"
 	"strconv"
 	"strings"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/coocood/freecache"
+	"github.com/lmj/mqtt-clients-demo/common"
+	"github.com/lmj/mqtt-clients-demo/config"
+	"github.com/lmj/mqtt-clients-demo/logger"
 )
 
 // 0102005219bc03343231393830314132365538323041453030305735343231393830314132365538323041453030305735063cd2e5bb07dc001105543332304d00000000200700420000ffffffff000f347a
 func errorCheck(err error, where string, kill bool) {
 	if err != nil {
 		if kill {
-
-			log.WithError(err).Fatalln("Script Terminated", where)
+			logger.Log.WithError(err).Fatalln("Script Terminated", where)
 		} else {
-			log.WithError(err).Warnf("@ %s\n", where)
+			logger.Log.WithError(err).Warnf("@ %s\n", where)
 		}
 	}
 }
 
-func sendJoin(msgType string) {
 
-}
-
-func sendLeave(msgType string) {
-
-}
-
-// 当前消息,key表示三级地址的串联，中间需要配置
-// 只需要管模拟和记录即可
-func encKeepAliveMsg(msgType string, dev TerminalInfo, sn string) string {
-	var msg strings.Builder
-	msg.WriteString(Opts.UdpVer) //消息版本
-	msg.WriteString(sn)
-	msg.WriteString("03") //地址级数默认走3级
-	//默认SN SN MAC
+//当前消息,key表示三级地址的串联，中间需要配置
+//只需要管模拟和记录即可
+//该函数需要适配不同的消息类型1，2，3，4分别对应相关的需求命令
+//payload的使用，实在构造回复消息的时作为消息载体存在
+func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) string {
+	var (
+		msg     strings.Builder
+		randMsg string
+	)
+	msg.WriteString(config.UDP_VERSION_TYPE) //消息版本
+	msg.WriteString(FrameSN)
+	msg.WriteString("03") //地址级数
 	msg.WriteString("34")
 	msg.WriteString(dev.FirstAddr)
 	msg.WriteString("34")
 	msg.WriteString(dev.SecondAddr)
-	msg.WriteString("06")
-	msg.WriteString(dev.ThirdAddr)
+	randMsg = getRand(4, false) //模拟消息载体信息
+	if msgType == DataMsgType.UpMsg.KeepAliveEvent || msgType == DataMsgType.GeneralAck {  //基本保活
+		msg.WriteString("06")
+		mMac, _ := common.DevSNwithMac.Load(dev.devSN + "M")
+		msg.WriteString(mMac.(string))
+
+	} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent { //终端入网
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		randMsg = "86d3" + gmac.(string) + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
+	} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		randMsg = "86d3" + gmac.(string) + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
+	} else if msgType == "2206" { //终端端口汇报
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		//profile编号，终端网络地址，状态成功，终端网络的地址，终端端口数量，终端端口列表
+		randMsg = "0104" + "86d3" + "00" + "86d3" + "01" + "01"
+	}
 	msg.WriteString("0011")       //默认
 	msg.WriteString("05")         //默认
 	msg.WriteString("543332304d") //T320M标识
@@ -56,17 +75,18 @@ func encKeepAliveMsg(msgType string, dev TerminalInfo, sn string) string {
 	//消息体信息
 	msg.WriteString(dev.IotModule) //物联网模组id
 	msg.WriteString("42")          //控制字H3C归一化报文
-	msg.WriteString("0000")        //地址信息
+	msg.WriteString("86d3")        //地址信息
 	msg.WriteString("")            //子地址
 	msg.WriteString("")            //端口ID
 	msg.WriteString("ffffffff")    //厂商topic
-	randMsg := getRand(4, false)
-	msg.WriteString(randMsg) //消息信息
+	if payLoad == "" {
+		msg.WriteString(randMsg)       //消息信息
+	} else {
+		msg.WriteString(payLoad)
+	}
 	message := generateLenOfMsg(msg)
 	b, _ := hex.DecodeString(message)
-	message += CRC(b) //生成家校验码校验
-	//message = "010200525ee603343231393830314132365538323041453030305735343231393830314132365538323041453030305735063cd2e5bb07dc001105543332304d00000000200700420000ffffffff000f6022"
-
+	message += CRC(b)
 	return message
 }
 
@@ -90,9 +110,9 @@ func Check(msg []byte) bool {
 
 // 随机生成序列
 func getRand(length int, isDigit bool) string {
-	rand.Seed(time.Now().UnixNano())
+	time.Sleep(time.Nanosecond)
 	if length < 1 {
-		log.Errorln("范围有误!")
+		logger.Log.Errorln("范围有误!")
 		return ""
 	}
 	var char string
@@ -113,8 +133,7 @@ func getRand(length int, isDigit bool) string {
 
 // 检测保活信息的处理
 func procKeepAliveMsgFreeCache(key string, t int, clientName string) {
-	// by luminjie
-	// TODO: 这里做一下如下处理：当三次未收到保活ack时，需要将udp通道断开5分钟，5分钟后重连udp
+	logger.Log.Infoln("Start detecting message survival!")
 	var timerID = time.NewTimer(time.Duration(t*3+3) * time.Second)
 	MsgCheckTimeID.Store(key, timerID)
 	<-timerID.C
@@ -125,31 +144,36 @@ func procKeepAliveMsgFreeCache(key string, t int, clientName string) {
 			updateTime, err := KeepAliveTimerFreeCacheGet(key, clientName)
 			if err == nil {
 				if time.Now().UnixNano()-updateTime > int64(time.Duration(3*t)*time.Second) {
-					log.Warnln("device :", key, "has not revc keep alive msg for",
+					logger.Log.Warnln("device :", key, "has not revc keep alive msg for",
 						(time.Now().UnixNano()-updateTime)/int64(time.Second), "seconds. This Client exit!")
-					fcache, _ := MsgForEvery.Load(clientName)
+					fcache, _ := ClientForEveryMsg.Load(clientName)
+					fcache.(*freecache.Cache).Del([]byte(key))
+					fcache, _ = MsgAllClientPayload.Load(clientName)
 					fcache.(*freecache.Cache).Del([]byte(key))
 				}
+			} else if err.Error() != "Entry not found" {
+				logger.Log.Warnln("/udpclient/procKeepAliveMsgFreeCache", err)
 			}
 		}
 	}
 }
 
-// 获取对应客户端中的key消息缓存情况
+// 获取对应客户端中的key消息缓存的截至过期时间
 func KeepAliveTimerFreeCacheGet(key, client string) (int64, error) {
 	var updateTime int64
 	var err error
-	fcache, _ := MsgForEvery.Load(client)
-	value, err := fcache.(*freecache.Cache).Get([]byte(key))
-	if err == nil {
-		updateTime, err = strconv.ParseInt(string(value), 10, 64)
+	fcache, ok := ClientForEveryMsg.Load(client)
+	if !ok {
+		return 0, errors.New("Connect has Interrupted!")
 	}
+	value, err := fcache.(*freecache.Cache).Get([]byte(key))
+	if err != nil {
+		return 0, err
+	} 
+	updateTime, err = strconv.ParseInt(string(value), 10, 64)
 	return updateTime, err
 }
 
-func (T *TerminalInfo) toString() {
-	fmt.Println("firstAddr is : ", T.FirstAddr, "secondAddr is : ", T.SecondAddr, "thirdAddr is :", T.ThirdAddr)
-}
 
 // real自增后转化成sz长度的字符串
 func makeHex(real string, sz int) string {
@@ -161,3 +185,14 @@ func makeHex(real string, sz int) string {
 	}
 	return frameSN
 }
+
+/*对缓存中取到的消息进行确认，并生成需要重发的消息*/
+func CreateNewMsg(FrameSN string, Msg []byte) string {
+	szOfMsg := len(Msg)
+	byteOfSN, _ := hex.DecodeString(FrameSN)
+	Msg[4], Msg[5] = byteOfSN[0], byteOfSN[1]
+	byteofCRC, _ := hex.DecodeString(CRC(Msg[0 : szOfMsg-2]))
+	Msg[szOfMsg-2], Msg[szOfMsg-1] = byteofCRC[0], byteofCRC[1]
+	return  hex.EncodeToString(Msg)
+}
+

@@ -2,14 +2,9 @@
 package udpclient
 
 import (
-	 
 	"strconv"
 	"strings"
-
-	 
 )
-
-//CRC CRC
 func CRC(msg []byte) string {
 	var temp = 0
 	var crc = 0xffff
@@ -27,6 +22,5 @@ func CRC(msg []byte) string {
 	var builder strings.Builder
 	builder.WriteString("0000")
 	builder.WriteString(strconv.FormatInt(int64(crc), 16))
-
 	return strings.Repeat(builder.String()[builder.Len()-4:], 1)
 }

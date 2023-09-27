@@ -1,4 +1,3 @@
-
 package udpclient
 
 import (
@@ -12,12 +11,17 @@ func init() {
 	DataMsgType.UpMsg.KeepAliveEvent = "2007"
 	DataMsgType.UpMsg.TerminalJoinEvent = "2001"
 	DataMsgType.UpMsg.TerminalLeaveEvent = "2002"
-	DataMsgType.DownMsg.GeneralAck = "2006"
+	DataMsgType.GeneralAck = "2006"
+	DataMsgType.DownMsg.TerminalGetPort = "2205"
+	DataMsgType.UpMsg.StartEvent = "0000"
+	DataMsgType.UpMsg.TerminalReportPort = "2206"
+	DataMsgType.DownMsg.NeedAck = "1111"
 }
 
 type MessageType struct {
 	UpMsg   UpMsg
 	DownMsg DownMsg
+	GeneralAck      string
 }
 
 type UpMsg struct {
@@ -25,13 +29,17 @@ type UpMsg struct {
 	TerminalLeaveEvent string
 	DataUpEvent        string
 	KeepAliveEvent     string
+	StartEvent         string
+	TerminalReportPort string
 }
 
 type DownMsg struct {
-	GeneralAck string
+	
+	TerminalGetPort string
+	NeedAck string
 }
 
-//some bytes associated with an address
+// some bytes associated with an address
 type packet struct {
 	bytes         []byte
 	returnAddress *net.UDPAddr
@@ -39,11 +47,10 @@ type packet struct {
 
 type Client struct {
 	Connection *net.UDPConn
-	port       int
 	messages   chan Message
 	packets    chan packet
-	kill       chan bool
-	msgType    chan string 
+	Kill       chan bool
+	msgType    chan string
 	clientname string
 }
 
@@ -52,36 +59,36 @@ type Message struct {
 	Message []byte
 }
 
-//create a new client.
+// create a new client.
 func NewClient() *Client {
 	return &Client{
 		packets:  make(chan packet),
 		messages: make(chan Message),
-		kill:     make(chan bool),
-		msgType: make(chan string), //通道传递
+		Kill:     make(chan bool),
+		msgType:  make(chan string), //通道传递
 	}
 }
 
-//模拟设备的链路信息
+// 模拟设备的链路信息
 type TerminalInfo struct {
 	FirstAddr  string //地址一级
 	SecondAddr string
 	ThirdAddr  string
 	IotModule  string
 	key        string
-	client     *Client     //设备对应连接客户端
+	Client     *Client     //设备对应连接客户端
 	msgType    chan string //通道传递
-
+	devSN      string
 }
 
-//JSONInfo JSONInfo
+// JSONInfo JSONInfo
 type JSONInfo struct {
 	TunnelHeader   TunnelHeader   `json:"tunnelHeader"`   //传输头
 	MessageHeader  MessageHeader  `json:"messageHeader"`  //应用头
 	MessagePayload MessagePayload `json:"messagePayload"` //应用数据
 }
 
-//TunnelHeader TunnelHeader
+// TunnelHeader TunnelHeader
 type TunnelHeader struct {
 	Version         string
 	FrameLen        string
@@ -95,7 +102,7 @@ type TunnelHeader struct {
 	TunnelHeaderLen int
 }
 
-//LinkInfo LinkInfo
+// LinkInfo LinkInfo
 type LinkInfo struct {
 	AddrNum    string
 	ACMac      string
@@ -107,14 +114,14 @@ type LinkInfo struct {
 	Address    []AddrInfo
 }
 
-//AddrInfo AddrInfo
+// AddrInfo AddrInfo
 type AddrInfo struct {
 	AddrInfo string
 	MACAddr  string
 	SN       string
 }
 
-//ExtendInfo ExtendInfo
+// ExtendInfo ExtendInfo
 type ExtendInfo struct {
 	IsNeedUserName bool
 	IsNeedDevType  bool
@@ -124,7 +131,7 @@ type ExtendInfo struct {
 	ExtendData     string
 }
 
-//SecInfo SecInfo
+// SecInfo SecInfo
 type SecInfo struct {
 	SecType    string
 	SecDataLen string
@@ -132,25 +139,25 @@ type SecInfo struct {
 	SecID      string
 }
 
-//VenderInfo VenderInfo
+// VenderInfo VenderInfo
 type VenderInfo struct {
 	VenderIDLen string
 	VenderID    string
 }
 
-//DevTypeInfo DevTypeInfo
+// DevTypeInfo DevTypeInfo
 type DevTypeInfo struct {
 	DevTypeLen string
 	DevType    string
 }
 
-//UserNameInfo UserNameInfo
+// UserNameInfo UserNameInfo
 type UserNameInfo struct {
 	UserNameLen string
 	UserName    string
 }
 
-//MessageHeader MessageHeader
+// MessageHeader MessageHeader
 type MessageHeader struct {
 	OptionType       string
 	SN               string
@@ -158,7 +165,7 @@ type MessageHeader struct {
 	MessageHeaderLen int
 }
 
-//CtrlMsg CtrlMsg
+// CtrlMsg CtrlMsg
 type CtrlMsg struct {
 	Addr    string
 	SubAddr string
@@ -166,7 +173,7 @@ type CtrlMsg struct {
 	CtrlLen int
 }
 
-//MessagePayload MessagePayload
+// MessagePayload MessagePayload
 type MessagePayload struct {
 	ModuleID string
 	Ctrl     int

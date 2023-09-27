@@ -1,62 +1,75 @@
 package udpclient
 
 import (
-	"demo/config"
+	"net/http"
+	"os"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/coocood/freecache"
-	"github.com/jessevdk/go-flags"
-	cmap "github.com/orcaman/concurrent-map"
+	"github.com/lmj/mqtt-clients-demo/config"
+	"github.com/lmj/mqtt-clients-demo/logger"
 )
-
-var ClientMapUDP cmap.ConcurrentMap
-
-var Opts struct {
-	ServerAddress string `short:"s" long:"serveraddress" default:"33.33.33.244:3501" description:"The Server's Address"`
-	Buffer        int    `short:"b" long:"buffer" default:"1024" description:"max buffer size for the socket io"`
-	Quiet         bool   `short:"q" long:"quiet" description:"whether to print logging info or not"`
-	UdpVer        string `short:"u" long:"udpver" default:"0102" description:"The version number of the udp message"`
-}
 
 var TnfGroup []TerminalInfo
 
-func init() {
-	ClientMapUDP = cmap.New()
-	_, err := flags.Parse(&Opts)
-	errorCheck(err, "init", true)
-	if Opts.Quiet {
-		log.SetLevel(log.WarnLevel)
-	}
-	formatter := &log.TextFormatter{
-		ForceColors:     true,
-		FullTimestamp:   true,
-		TimestampFormat: "15:04:05",
-	}
-	log.SetFormatter(formatter)
-}
-
-func StartUDP() {
-	termiGroup := GenMode(config.UDP_T320M_NUM)
-	for _, v := range termiGroup {
-		go sendMsg(v, v.client)
-		go v.client.readFromSocket(Opts.Buffer)
-		go v.client.processPackets()
-		v.client.msgType <- "0000" //触发
+// 该地方留给触发按键
+func StartUDP(sig chan os.Signal, timestamp string) {
+	TnfGroup = GenMode(config.UDP_T320M_NUM)
+	for _, v := range TnfGroup {
+		go sendMsg(v, v.Client)
+		go v.Client.readFromSocket(config.UDP_BUFFER_SIZE)
+		go v.Client.processPackets()
+		v.Client.msgType <- "00002007"
 	}
 
 	//间隔检测内存使用情况
 	go func() {
-		var tickerID = time.NewTicker(time.Duration(10) * time.Second)
+		var tickerID = time.NewTicker(time.Duration(config.UDP_ALIVE_CHECK_TIME) * 5 * time.Second)
 		defer tickerID.Stop()
 		for {
 			<-tickerID.C
 			var cacheNum int64 = 0
-			MsgForEvery.Range(func(key, value interface{}) bool {
+			ClientForEveryMsg.Range(func(key, value interface{}) bool {
 				cacheNum += value.(*freecache.Cache).EntryCount()
 				return true
 			})
-			log.Println("MsgForEvery' EntryCount: ", cacheNum)
+			logger.Log.Errorln("ClientForEveryMsg's EntryCount: ", cacheNum)
+			// 监听程序退出
+			select {
+			case <-sig:
+				return
+			default:
+				continue
+			}
 		}
 	}()
+
+	go func() {
+		for {
+			http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
+				curStatus := r.FormValue("isLeave")
+				if curStatus == "模拟终端入网" {
+					for _, v := range TnfGroup {
+						go func(t1 TerminalInfo) { //模拟终端离网
+							t1.Client.msgType <- "00002001"
+						}(v)
+					}
+				} else {
+					for _, v := range TnfGroup {
+						go func(t1 TerminalInfo) { //模拟终端入网
+							t1.Client.msgType <- "00002002"
+						}(v)
+					}
+				}
+			})
+			http.ListenAndServe(":7777", nil)
+			select {
+			case <-sig:
+				return
+			default:
+				continue
+			}
+		}
+	}()
+
 }

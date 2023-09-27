@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/lmj/mqtt-clients-demo/logger"
 )
 
 //ParseUDPMsg ParseUDPMsg
@@ -199,7 +199,7 @@ func parseCtrl(udpMsg []byte, ctrl int) CtrlMsg {
 		portIDLen = 8
 	default:
 		portIDLen = 0
-		log.Warnln("invalid portIDLen:", portIDLen)
+		logger.Log.Warnln("invalid portIDLen:", portIDLen)
 	}
 	switch subAddrLen {
 	case 0:
@@ -212,7 +212,7 @@ func parseCtrl(udpMsg []byte, ctrl int) CtrlMsg {
 		subAddrLen = 8
 	default:
 		subAddrLen = 0
-		log.Warnln("invalid subAddrLen:", subAddrLen)
+		logger.Log.Warnln("invalid subAddrLen:", subAddrLen)
 	}
 	switch reserve {
 	case 0: //����1
@@ -227,7 +227,7 @@ func parseCtrl(udpMsg []byte, ctrl int) CtrlMsg {
 			addrLen = 20
 		default:
 			addrLen = 0
-			log.Warnln("invalid addrLen:", addrLen)
+			logger.Log.Warnln("invalid addrLen:", addrLen)
 		}
 	case 1: //����2
 		switch addrLen {
@@ -237,7 +237,7 @@ func parseCtrl(udpMsg []byte, ctrl int) CtrlMsg {
 			addrLen = 2
 		default:
 			addrLen = 0
-			log.Warnln("invalid addrLen:", addrLen)
+			logger.Log.Warnln("invalid addrLen:", addrLen)
 		}
 	}
 
