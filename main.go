@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	cmap "github.com/orcaman/concurrent-map"
 	"github.com/pborman/uuid"
 
@@ -121,15 +122,15 @@ func mqttConnectFirst(sig chan os.Signal, timestamp string) bool {
 	wg := &sync.WaitGroup{}
 	wg.Add(config.DEVICE_TOTAL_COUNT)
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
-		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)  //唯一设备对应唯一
+		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i) //唯一设备对应唯一
 		randomGMAC := make([]byte, 8)
 		rand.Read(randomGMAC)
 		GMac := hex.EncodeToString(randomGMAC)
 		modMAC := make([]byte, 6)
 		rand.Read(modMAC)
 		mMac := hex.EncodeToString(modMAC)
-		common.DevSNwithMac.Store(devSN + "G",GMac)   //将设备的mac固定下来
-		common.DevSNwithMac.Store(devSN + "M",mMac)
+		common.DevSNwithMac.Store(devSN+"G", GMac) //将设备的mac固定下来
+		common.DevSNwithMac.Store(devSN+"M", mMac)
 		var clientId string
 		var userName string = config.MQTT_CLIENT_USERNAME
 		var password string = config.MQTT_CLIENT_PASSWORD
@@ -370,55 +371,61 @@ func checkAndDisplay(timestamp string) {
 }
 
 func stop(sig chan os.Signal) {
-	<-time.After(3 * time.Second)
-	logger.Log.Infoln("客户端触发停止，正在销毁资源！！！请等待...")
-	clientMap := cmap.New()
-	for i := range mqttclient.ClientMap.IterBuffered() {
-		clientMap.Set(i.Key, i.Val)
-	}
-	mqttclient.ClientMap.Clear()
-	wg := &sync.WaitGroup{}
-	wg.Add(clientMap.Count())
-	for i := range clientMap.IterBuffered() {
-		cli := i.Val.(common.MqttClientInfo)
-		var subTopic []string
-		if config.PRODUCT_NAME == "自定义" {
-			subTopic = getSubTopic(cli.DevSN)
-		} else {
-			for _, topic := range config.SUB_TOPIC {
-				subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, cli.DevSN))
+	//去除时间戳，防止重复清理
+	common.UniqueTime.Mu.Lock()
+	defer common.UniqueTime.Mu.Unlock()
+	if !mqttclient.ClientStopMap.IsEmpty() {
+		mqttclient.ClientStopMap.Clear()
+		<-time.After(3 * time.Second)
+		logger.Log.Infoln("客户端触发停止，正在销毁资源！！！请等待...")
+		clientMap := cmap.New()
+		for i := range mqttclient.ClientMap.IterBuffered() {
+			clientMap.Set(i.Key, i.Val)
+		}
+		mqttclient.ClientMap.Clear()
+		wg := &sync.WaitGroup{}
+		wg.Add(clientMap.Count())
+		for i := range clientMap.IterBuffered() {
+			cli := i.Val.(common.MqttClientInfo)
+			var subTopic []string
+			if config.PRODUCT_NAME == "自定义" {
+				subTopic = getSubTopic(cli.DevSN)
+			} else {
+				for _, topic := range config.SUB_TOPIC {
+					subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, cli.DevSN))
+				}
+			}
+			cli.Client.Unsubscribe(subTopic...)
+			cli.Client.Disconnect(uint(config.MQTT_CLIENT_CONNECT_INTERVAL))
+			logger.Log.Infoln("客户端停止，关闭MQTT连接: ", cli.DevSN)
+			<-time.After(time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL) * time.Microsecond)
+			wg.Done()
+
+			// 监听程序退出
+			select {
+			case <-sig:
+				exit()
+			default:
+				continue
 			}
 		}
-		cli.Client.Unsubscribe(subTopic...)
-		cli.Client.Disconnect(uint(config.MQTT_CLIENT_CONNECT_INTERVAL))
-		logger.Log.Infoln("客户端停止，关闭MQTT连接: ", cli.DevSN)
-		<-time.After(time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL) * time.Microsecond)
-		wg.Done()
-
-		// 监听程序退出
-		select {
-		case <-sig:
-			exit()
-		default:
-			continue
+		logger.Log.Infoln("Exit/ start close udp connection!")
+		wg.Add(len(udpclient.TnfGroup))
+		for _, term := range udpclient.TnfGroup {
+			udpclient.ClientForEveryMsg.Range(func(key, value interface{}) bool {
+				udpclient.ClientForEveryMsg.Delete(key)
+				return true
+			})
+			udpclient.MsgAllClientPayload.Range(func(key, value interface{}) bool {
+				udpclient.ClientForEveryMsg.Delete(key)
+				return true
+			})
+			term.Client.Connection.Close()
+			wg.Done()
 		}
+		wg.Wait()
+		logger.Log.Infoln("所有资源已销毁")
 	}
-	logger.Log.Infoln("Exit/ start close udp connection!")
-	wg.Add(len(udpclient.TnfGroup))
-	for _, term := range udpclient.TnfGroup {
-		udpclient.ClientForEveryMsg.Range(func(key, value interface{}) bool {
-			udpclient.ClientForEveryMsg.Delete(key)
-			return true
-		})
-		udpclient.MsgAllClientPayload.Range(func(key, value interface{}) bool {
-			udpclient.ClientForEveryMsg.Delete(key)
-			return true
-		})
-		term.Client.Connection.Close()
-		wg.Done()
-	}
-	wg.Wait()
-	logger.Log.Infoln("所有资源已销毁")
 }
 
 func exit() {
@@ -446,7 +453,7 @@ func exit() {
 		logger.Log.Infoln("进程退出，关闭MQTT连接: ", cli.DevSN)
 		<-time.After(time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL) * time.Microsecond)
 		wg.Done()
-	}	
+	}
 	wg.Wait()
 	logger.Log.Warnln("========================Exit=======================")
 	fmt.Println(`
@@ -458,6 +465,7 @@ func exit() {
 }
 
 func do(sig chan os.Signal, timestamp string) {
+
 	// 1、先进行MQTT连接
 	isNeedNext := mqttConnectFirst(sig, timestamp)
 
@@ -477,7 +485,7 @@ func do(sig chan os.Signal, timestamp string) {
 			lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
 		}
 	}
-	go udpclient.StartUDP(sig, timestamp)//通道保活开启
+	go udpclient.StartUDP(sig, timestamp) //通道保活开启
 	// 4、启动定时器，对数据进行定时上送
 	if isNeedNext {
 		<-time.After(time.Second * 3)

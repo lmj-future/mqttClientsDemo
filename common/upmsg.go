@@ -151,7 +151,9 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 		randomMMAC, _ := DevSNwithMac.Load(devSN + "M")
 		modMac := randomMMAC.(string)
 		modMac = modMac[0:4] + "-" + modMac[4:8] + "-" + modMac[8:]
-		randomGMAC, _ := DevSNwithMac.Load(devSN + "G")
+		randomGMAC1, _ := DevSNwithMac.Load(devSN + "G")
+		randomGMAC2 := randomGMAC1.(string)
+		randomGMAC2 = randomGMAC2[0:4]+ "-"+randomGMAC2[4:8] +"-" + randomGMAC2[8:12] + "-" + randomGMAC2[8:12]
 		randomIP := make([]byte, 4)
 		rand.Read(randomIP)
 		ip := net.IP(randomIP)
@@ -173,7 +175,7 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 			{
 				NodeMAC:              nodeMac,
 				NodeIP:               ip.String(),
-				Gmac:                 randomGMAC.(string),
+				Gmac:                 randomGMAC1.(string),
 				CanID:                0,
 				NodeSN:               devSN,
 				NodeModel:            nodeModel,
@@ -193,13 +195,13 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 						ModSN:          devSN,
 					},
 					{
-						Type:           6,
+						Type:           3,
 						PortID:         1,
-						ModModel:       "T300PB0U",
+						ModModel:       "T301-Z",
 						ModHwVersion:   "Ver.A",
 						ModSwVersion:   "R1245",
 						ModSwInVersion: "V100R001B01D029SP45",
-						ModMAC:         modMac,
+						ModMAC:         randomGMAC2,
 						ModSN:          devSN,
 					},
 				},
@@ -224,9 +226,9 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 					},
 					{
 						PortID:     1,
-						ModStatus:  0,
-						Type:       6,
-						ModModel:   "T300PB0U",
+						ModStatus:  1,
+						Type:       3,
+						ModModel:   "T301-Z",
 						ModPullCfg: 0,
 					},
 				},
@@ -247,9 +249,9 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 					},
 					{
 						PortID:    1,
-						ModStatus: 0,
-						Type:      6,
-						ModModel:  "T300PB0U",
+						ModStatus: 1,
+						Type:      3,
+						ModModel:  "T301-Z",
 					},
 				},
 			},

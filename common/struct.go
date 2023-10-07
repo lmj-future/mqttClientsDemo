@@ -1,6 +1,12 @@
 package common
 
-import mqtt "github.com/eclipse/paho.mqtt.golang"
+import (
+	"sync"
+
+	mqtt "github.com/eclipse/paho.mqtt.golang"
+)
+
+var UniqueTime Unique = Unique{}
 
 type MqttClientInfo struct {
 	DevSN       string
@@ -180,4 +186,10 @@ type DownMsgRsp struct {
 type PropertyUp struct {
 	MsgId  string      `json:"msgid"`
 	Params interface{} `json:"params"`
+}
+
+
+
+type Unique struct {
+    Mu sync.Mutex
 }
