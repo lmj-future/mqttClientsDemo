@@ -56,7 +56,7 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 	// 死循环用于连接失败后进行重连，连接成功后跳出循环
 	for {
 		// 如果此次开始被停止了，那么就要停止此次开始所做的事情
-		if v, ok := ClientStopMap.Get(timestamp); ok && v.(bool) {
+		if v, ok := ClientStopMap.Get(timestamp); (ok && v.(bool)) || !ok {
 			break
 		}
 		if cli, err := connect(clientInfo, clientOptions, clientState); err != nil {

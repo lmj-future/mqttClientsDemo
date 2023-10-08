@@ -18,7 +18,6 @@ import (
 var MsgCheckTimeID = &sync.Map{}
 var ClientForEveryMsg = &sync.Map{}
 var MsgAllClientPayload = &sync.Map{} //记录一个客户端的保活消息载体
-//var MsgDownMsgPayloadAck = &sync.Map{}  //记录所有下行消息
 
 func (c *Client) setupConnection(address string) {
 	addr, err := net.ResolveUDPAddr("udp4", address)
@@ -83,7 +82,7 @@ func (c *Client) processPackets() {
 				if jsoninfo.MessagePayload.Data == DataMsgType.UpMsg.KeepAliveEvent {
 					message = cacheKey
 					c.msgType <- message
-				} else { //目前来说，有且仅有这一种，除了保活消息以外其他消息我都从缓存里删除掉
+				} else { //目前来说，有且仅有这一种，除了保活消息以外其他消息从缓存里删除掉
 					fcache.(*freecache.Cache).Del([]byte(cacheKey))
 					mcache.(*freecache.Cache).Del([]byte(cacheKey))
 				}
@@ -177,10 +176,10 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 					fcache.(*freecache.Cache).Del([]byte(cacheKey))
 					time.Sleep(time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)) //重新生成消息后再清理缓存
 				}
-			} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent { //终端入网
+			} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent { 
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalJoin message")
 				prepareSend = encMsg(msgType, Terminal, FrameSN, "")
-			} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网
+			} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { 
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalLeave message")
 				prepareSend = encMsg(msgType, Terminal, FrameSN, "")
 			} else if msgType == DataMsgType.UpMsg.TerminalReportPort { //收到终端上报数据时, 需要主动回复ack
@@ -208,7 +207,7 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 	}
 }
 
-// 保活消息重发,重发以后就走到keepalive环节了，如果也没有
+// 保活消息重发
 func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, key string) {
 	if resendTime == 4 {
 		return

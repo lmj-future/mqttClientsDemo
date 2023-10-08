@@ -1,5 +1,8 @@
 
 document.title = "MQTT CLIENTS DEMO v1.0.2"
+const hashTable = {};
+
+
 var timestamp = Date.now().toString();
 var config = {
     PPS: 7,
@@ -121,24 +124,26 @@ function setTimestamp() {
 }
 function getStartButton() {
     return document.querySelector('div[data-label="开始按钮"]');
-    
 }
 function getStopButton() {
     return document.querySelector('div[data-label="停止按钮"]');
 }
-//终端入离网
 function getTerminalJoinOrLeave() {
-    return document.getElementById("u247_input")
+    return document.getElementById("u247_input");
+}
+function getTerminalId() {
+    return document.getElementById("u250_input").value;
 }
 
 //绑定点击信息
+//这里还需要发送对应终端的id过去
 function changeTerminalJoiToLeave() {
     var TerButton = getTerminalJoinOrLeave();
     if (TerButton !== null && TerButton !== undefined) {   
         TerButton.addEventListener('click', function() {       
-            //setTimestamp();
+            var TerId = getTerminalId()
             var xhr = new XMLHttpRequest();
-            xhr.open("GET","http://localhost:7777/api/data?isLeave="+ TerButton.value ,true)
+            xhr.open("GET","http://localhost:7777/api/data?id=" + TerId + "&isLeave="+ TerButton.value ,true)
             changeButtonStatus(); 
             xhr.send(); 
         });
@@ -174,7 +179,6 @@ function disableTerminalJoinOrLeaveButton() {
         disButton.style.opacity = '0.5';  // 设置按钮透明度为0.5，呈现灰色效果
     }
 }
-//程序开始后开启该按钮
 function enableTerminalJoinOrLeaveButton() {
     var enableButton = getTerminalJoinOrLeave();
     if (enableButton !== null && enableButton !== undefined) {
@@ -182,7 +186,6 @@ function enableTerminalJoinOrLeaveButton() {
         enableButton.style.opacity = '1';  // 设置按钮透明度为0.5，呈现灰色效果
     }
 }
-
 
 function enableStopButton() {
     var stopButton = getStopButton();
@@ -201,6 +204,8 @@ function startButtonEvent() {
             setTimestamp();
             start(getConfig(), getTimestamp());
             enableStopButton();
+            initDropList();
+            initTerminalStatus();
         });
     }
 }
@@ -219,11 +224,27 @@ function stopButtonEvent() {
 
 //更改状态为终端离网
 function changeButtonStatus() {
-    var JoinOrLeaveButton = getTerminalJoinOrLeave();
-    if (JoinOrLeaveButton !== null && JoinOrLeaveButton !== undefined) {
-        JoinOrLeaveButton.value = JoinOrLeaveButton.value === "模拟终端入网" ? "模拟终端离网" : "模拟终端入网" 
+    //首先从下拉列表中获取
+    var terminalId = document.getElementById("u250_input")
+    var JoinOrLeaveButton = document.getElementById("u247_input")
+    if (terminalId !== null && terminalId !== undefined) {
+        var JoinOrLeavStatus =  hashTable[terminalId.value];
+        if (JoinOrLeavStatus !== null && JoinOrLeavStatus !== undefined) {
+            hashTable[terminalId.value] = JoinOrLeavStatus === "模拟终端入网" ? "模拟终端离网" : "模拟终端入网" 
+            JoinOrLeaveButton.value = JoinOrLeavStatus === "模拟终端入网" ? "模拟终端离网" : "模拟终端入网" 
+        }
     }
 }
+
+function initTerminalStatus() {
+    var sz = document.getElementById("u155_input")
+    if (sz !== null && sz !== undefined) {
+        for (var i = 1; i <= sz.value; i ++) {
+            hashTable[i +""] = "模拟终端入网"
+        }
+    }
+}
+
 function getSubLogCheckboxEvent() {
     var div = document.querySelector('div[data-label="MQTT_SUBSCRIBE_ENABLE"]')
     if (div !== null && div !== undefined) {return div.querySelector('input');}
@@ -275,6 +296,29 @@ function telnetCheckboxEvent() {
         });
     }
 }
+
+function initDropList() {
+    var selectElement = document.getElementById("u250_input");
+    var lengthPre = selectElement.options.length;
+    for (var i = lengthPre - 1; i >= 0; i --) {
+        selectElement.remove(i);
+    }
+    var len = document.getElementById("u155_input")
+    for (var i = 1; i <= len.value; i ++) {
+        var option = document.createElement("option");
+        option.text = i;
+        selectElement.add(option);
+    }
+}
+
+function changeWithSelect() {
+    var selectElement = document.getElementById('u250_input');
+    var TerminalButton = document.getElementById('u247_input');
+    selectElement.addEventListener('change', function() {
+        TerminalButton.value = hashTable[selectElement.value]
+    });
+}
+
 enableStartButton();
 disableStopButton();
 startButtonEvent();
@@ -284,3 +328,4 @@ pubLogCheckboxEvent();
 telnetCheckboxEvent();
 disableTerminalJoinOrLeaveButton();
 changeTerminalJoiToLeave();
+changeWithSelect();

@@ -3100,12 +3100,12 @@
   position:absolute;
   left:305px;
   top:470px;
-  width:100px;
+  width:500px;
   height:25px;
 }
 #u247_input {
     position:absolute;
-    left:0px;
+    left:160px;
     top:0px;
     width:100px;
     height:25px;
@@ -3117,3 +3117,33 @@
     color:#333333;
     text-align:center;
 }
+#u248 {
+  position:absolute;
+    left:0px;
+    top:2px;
+    width:100px;
+    height:25px;
+    font-family:'Arial Normal', 'Arial';
+    font-weight:400;
+    font-style:normal;
+    font-size:15px;
+    text-decoration:none;
+    color:#333333;
+    text-align:center;
+}
+#u250_input {
+  position:absolute;
+  left:100px;
+  top:2px;
+  width:50px;
+  height:22px;
+  font-family:'Arial Normal', 'Arial';
+  font-weight:400;
+  font-style:normal;
+  font-size:13px;
+  text-decoration:none;
+  color:#000000;
+}
+  #u11_input:disabled {
+    color:grayText;
+  }

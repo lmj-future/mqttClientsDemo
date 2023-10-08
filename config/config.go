@@ -56,15 +56,18 @@ var LOG_SIZE int
 var LOG_BACKUP_COUNT int
 var LOG_STORE string
 
-// udp部分需用
+//UDP
 var (
-	UDP_T320M_NUM        int
-	UDP_ALIVE_CHECK_TIME int
-	UDP_SERVER_HOST      string
-	UDP_SERVER_PORT      int
-	UDP_BUFFER_SIZE      int
-	UDP_VERSION_TYPE     string
-	UDP_RESEND_TIME      int
+	UDP_T320M_NUM          int
+	UDP_ALIVE_CHECK_TIME   int
+	UDP_SERVER_HOST        string
+	UDP_SERVER_PORT        int
+	UDP_BUFFER_SIZE        int
+	UDP_VERSION_TYPE       string
+	UDP_RESEND_TIME        int
+	UDP_KEEPALIVE_MSG      string
+	UDP_TERMINAL_NETACCESS string
+	UDP_TERMINAL_NETLEAVE  string
 )
 
 func Init() *ini.File {
@@ -129,6 +132,9 @@ func Init() *ini.File {
 	UDP_BUFFER_SIZE, _ = cfg.Section("udp").Key("UDP_BUFFER_SIZE").Int()
 	UDP_VERSION_TYPE = cfg.Section("udp").Key("UDP_VERSION_TYPE").String()
 	UDP_RESEND_TIME, _ = cfg.Section("udp").Key("UDP_RESEND_TIME").Int()
+	UDP_TERMINAL_NETACCESS = cfg.Section("udp").Key("UDP_TERMINAL_NETACCESS").String()
+	UDP_TERMINAL_NETLEAVE = cfg.Section("udp").Key("UDP_TERMINAL_NETLEAVE").String()
+	UDP_KEEPALIVE_MSG = cfg.Section("udp").Key("UDP_KEEPALIVE_MSG").String()
 
 	switch PRODUCT_NAME {
 	case "T320M", "T320MX", "T320MX-U":
