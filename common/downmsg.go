@@ -116,6 +116,26 @@ func ProcDownMsg(c mqtt.Client, m mqtt.Message) {
 						},
 					}
 				}
+			case ZIGBEE_PERMIT_JOIN:
+				if downMsg.ModuleConfig != nil {
+					config := *downMsg.ModuleConfig
+					c1 := config.([]interface{})
+					c2 := c1[0].(map[string]interface{})
+					c3 := c2["moduleConfigList"].([]interface{})
+					c4 := c3[0].(map[string]interface{})
+					downMsgRsp.ModuleConfig = []ModuleConfigResult{
+						{
+							CanID:  int(c2["canID"].(float64)),
+							NodeSN: c2["nodeSN"].(string),
+							ModuleConfigList: []ModConfigResult{
+								{
+									PortID: int(c4["portID"].(float64)),
+									Result: "success",
+								},
+							},
+						},
+					}
+				}
 			}
 			downMsgRsp.RespCode = 0
 			downMsgRsp.Method = method + "Rsp"

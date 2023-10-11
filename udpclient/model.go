@@ -11,32 +11,49 @@ func init() {
 	DataMsgType.UpMsg.KeepAliveEvent = "2007"
 	DataMsgType.UpMsg.TerminalJoinEvent = "2001"
 	DataMsgType.UpMsg.TerminalLeaveEvent = "2002"
-	DataMsgType.GeneralAck = "2006"
-	DataMsgType.DownMsg.TerminalGetPort = "2205"
 	DataMsgType.UpMsg.StartEvent = "0000"
 	DataMsgType.UpMsg.TerminalReportPort = "2206"
+	DataMsgType.UpMsg.TerminalInfoUp = "2102"
+	DataMsgType.UpMsg.TerminalSvcDiscoverRsp = "2212"
+	DataMsgType.UpMsg.TerminalPortBindRsp = "2208"
+	DataMsgType.UpMsg.TerminalAccessRsp = "2210"
+
 	DataMsgType.DownMsg.NeedAck = "1111"
+	DataMsgType.DownMsg.TerminalGetPort = "2205"
+	DataMsgType.DownMsg.TerminalInfoDown = "2101"
+	DataMsgType.DownMsg.TerminalSvcDiscoverReq = "2211"
+	DataMsgType.DownMsg.TerminalPortBindReq = "2207"
+	DataMsgType.DownMsg.TerminalAccessReq = "220f"
+
+	DataMsgType.GeneralAck = "2006"
 }
 
 type MessageType struct {
-	UpMsg   UpMsg
-	DownMsg DownMsg
-	GeneralAck      string
+	UpMsg      UpMsg
+	DownMsg    DownMsg
+	GeneralAck string
 }
 
 type UpMsg struct {
-	TerminalJoinEvent  string
-	TerminalLeaveEvent string
-	DataUpEvent        string
-	KeepAliveEvent     string
-	StartEvent         string
-	TerminalReportPort string
+	TerminalJoinEvent      string
+	TerminalLeaveEvent     string
+	DataUpEvent            string
+	KeepAliveEvent         string
+	StartEvent             string
+	TerminalReportPort     string
+	TerminalInfoUp         string
+	TerminalSvcDiscoverRsp string //终端服务发现回复
+	TerminalPortBindRsp    string
+	TerminalAccessRsp      string //终端允许入网回复
 }
 
 type DownMsg struct {
-	
-	TerminalGetPort string
-	NeedAck string
+	TerminalInfoDown       string
+	TerminalGetPort        string
+	NeedAck                string
+	TerminalSvcDiscoverReq string //终端服务发现请求
+	TerminalPortBindReq    string //终端端口绑定
+	TerminalAccessReq      string //终端允许入网
 }
 
 // some bytes associated with an address
@@ -79,6 +96,7 @@ type TerminalInfo struct {
 	Client     *Client     //设备对应连接客户端
 	msgType    chan string //通道传递
 	devSN      string
+	DevEUI     string
 }
 
 // JSONInfo JSONInfo

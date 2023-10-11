@@ -1,8 +1,6 @@
 package common
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	mathRand "math/rand"
@@ -16,7 +14,8 @@ import (
 	"github.com/lmj/mqtt-clients-demo/logger"
 	"github.com/pborman/uuid"
 )
-var DevSNwithMac = &sync.Map{}  //记录mac信息
+
+var DevSNwithMac = &sync.Map{} //记录mac信息
 
 func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 	upMsg := UpMsg{}
@@ -144,18 +143,16 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 		upMsg.Version = "1.0"
 		upMsg.DevModelList = []string{"T301-IR", "T301-R", "T301-Z", "T320"}
 	case BASIC_INFO_UP:
-		randomMAC := make([]byte, 6)
-		rand.Read(randomMAC)
-		nodeMac := hex.EncodeToString(randomMAC)
+		v, _ := DevSNwithMac.Load(devSN + "M")
+		nodeMac := v.(string)
 		nodeMac = nodeMac[0:2] + ":" + nodeMac[2:4] + ":" + nodeMac[4:6] + ":" + nodeMac[6:8] + ":" + nodeMac[8:10] + ":" + nodeMac[10:]
-		randomMMAC, _ := DevSNwithMac.Load(devSN + "M")
-		modMac := randomMMAC.(string)
-		modMac = modMac[0:4] + "-" + modMac[4:8] + "-" + modMac[8:]
-		randomGMAC1, _ := DevSNwithMac.Load(devSN + "G")
+		randomMMAC, _ := DevSNwithMac.Load(devSN + "R")
+		RMac := randomMMAC.(string)
+		RMac = RMac[0:4] + "-" + RMac[4:8] + "-" + RMac[8:]
+		randomGMAC1, _ := DevSNwithMac.Load(devSN + "G") //ZIG
 		randomGMAC2 := randomGMAC1.(string)
-		randomGMAC2 = randomGMAC2[0:4]+ "-"+randomGMAC2[4:8] +"-" + randomGMAC2[8:12] + "-" + randomGMAC2[8:12]
-		randomIP := make([]byte, 4)
-		rand.Read(randomIP)
+		randomGMAC2 = randomGMAC2[0:4] + "-" + randomGMAC2[4:8] + "-" + randomGMAC2[8:12] + "-" + randomGMAC2[12:16]
+		randomIP := []byte{33, 33, 33, 138}
 		ip := net.IP(randomIP)
 		nodeModel := config.PRODUCT_NAME
 		nodeVersion := "R1268"
@@ -191,7 +188,7 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 						ModHwVersion:   "Ver.A",
 						ModSwVersion:   modVersion,
 						ModSwInVersion: "V100R001B01D029SP45",
-						ModMAC:         modMac,
+						ModMAC:         RMac,
 						ModSN:          devSN,
 					},
 					{
@@ -206,7 +203,6 @@ func EncUpMsg(method string, devSN string, downMsg DownMsg) []byte {
 					},
 				},
 			},
-			
 		}
 	case STATUS_UP:
 		upMsg.NodeStatusList = []NodeStatus{

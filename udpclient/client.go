@@ -12,7 +12,7 @@ import (
 
 var TnfGroup []TerminalInfo
 var ServerCh chan bool
-
+var ReStart int = -1 
 // 该地方留给触发按键
 func StartUDP(sig chan os.Signal, timestamp string) {
 	ServerCh = make(chan bool)
@@ -26,29 +26,33 @@ func StartUDP(sig chan os.Signal, timestamp string) {
 	srv := &http.Server{
 		Addr: ":7777",
 	}
-	http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
-		TerminalID, curStatus := r.FormValue("id"), r.FormValue("isLeave")
-		if curStatus == "模拟终端入网" {
-			ID, err := strconv.Atoi(TerminalID)
-			if err != nil {
-				return
+	if ReStart == 0 {
+		http.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
+			TerminalID, curStatus := r.FormValue("id"), r.FormValue("isLeave")
+			if curStatus == "模拟终端入网" {
+				ID, err := strconv.Atoi(TerminalID)
+				if err != nil {
+					return
+				}
+				TnfGroup[ID-1].Client.msgType <- config.UDP_TERMINAL_NETACCESS
+			} else {
+				ID, err := strconv.Atoi(TerminalID)
+				if err != nil {
+					return
+				}
+				TnfGroup[ID-1].Client.msgType <- config.UDP_TERMINAL_NETLEAVE
 			}
-			TnfGroup[ID-1].Client.msgType <- config.UDP_TERMINAL_NETACCESS
-		} else {
-			ID, err := strconv.Atoi(TerminalID)
-			if err != nil {
-				return
-			}
-			TnfGroup[ID-1].Client.msgType <- config.UDP_TERMINAL_NETLEAVE
-		}
-	})
+		})
+	}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Log.Errorf("ListenAndServe: %s", err)
-		}
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Log.Errorf("ListenAndServe: %s", err)
+			}
+		}()
 		<-ServerCh
-		if err := srv.Shutdown(nil); err != nil {
-			logger.Log.Errorf("Server shutdown failed: %s", err)
+		if err := srv.Close(); err != nil {
+			logger.Log.Errorf("Server Close failed: %s", err)
 		}
 		log.Println("Server Exited Properly")
 	}()

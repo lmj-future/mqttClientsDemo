@@ -25,7 +25,7 @@ import (
 )
 
 var clientState string = ""
-
+ 
 func init() {
 	config.Init()
 	logger.Init()
@@ -124,14 +124,17 @@ func mqttConnectFirst(sig chan os.Signal, timestamp string) bool {
 	wg.Add(config.DEVICE_TOTAL_COUNT)
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
 		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i) //唯一设备对应唯一
-		randomGMAC := make([]byte, 8)
-		rand.Read(randomGMAC)
+		randomGMAC := []byte{80,98,62,152,123,84,117,byte(i)}
 		GMac := hex.EncodeToString(randomGMAC)
-		modMAC := make([]byte, 6)
+		modMAC := []byte{80,98,62,152,123,byte(i)}
 		rand.Read(modMAC)
-		mMac := hex.EncodeToString(modMAC)
+		MMac := hex.EncodeToString(modMAC)
+		RMAC := []byte{96,98,78,152,178,byte(i)}
+		rand.Read(RMAC)
+		RMac := hex.EncodeToString(RMAC)
 		common.DevSNwithMac.Store(devSN+"G", GMac) //将设备的mac固定下来
-		common.DevSNwithMac.Store(devSN+"M", mMac)
+		common.DevSNwithMac.Store(devSN+"M", MMac)
+		common.DevSNwithMac.Store(devSN+"R", RMac)
 		var clientId string
 		var userName string = config.MQTT_CLIENT_USERNAME
 		var password string = config.MQTT_CLIENT_PASSWORD
@@ -432,8 +435,11 @@ func stop(sig chan os.Signal) {
 			break
 		}
 		time.Sleep(time.Second)
+		logger.Log.Infoln("所有资源已销毁")
+	} else {
+		logger.Log.Infoln("资源销毁已完成，无需重复销毁")
 	}
-	logger.Log.Infoln("所有资源已销毁")
+	
 }
 
 func exit() {
@@ -447,7 +453,7 @@ func exit() {
 }
 
 func do(sig chan os.Signal, timestamp string) {
-
+	udpclient.ReStart ++  //限制重新绑定
 	// 1、先进行MQTT连接
 	isNeedNext := mqttConnectFirst(sig, timestamp)
 

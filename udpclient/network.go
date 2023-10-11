@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	"github.com/coocood/freecache"
 	"github.com/lmj/mqtt-clients-demo/common"
 	"github.com/lmj/mqtt-clients-demo/config"
@@ -24,6 +25,7 @@ func (c *Client) setupConnection(address string) {
 	errorCheck(err, "setupConnection", true)
 	logger.Log.Warnln("> server address: ", addr.String(), " ... connecting ")
 	conn, err := net.DialUDP("udp4", nil, addr)
+	errorCheck(err, "setupConnection", true)
 	c.Connection = conn
 	//also listen from requests from the server on a random port
 	listeningAddress, err := net.ResolveUDPAddr("udp4", ":0")
@@ -32,6 +34,15 @@ func (c *Client) setupConnection(address string) {
 	conn, err = net.ListenUDP("udp4", listeningAddress)
 	errorCheck(err, "setupConnection", true)
 	logger.Log.Infoln("listening on: local: ", conn.LocalAddr())
+}
+
+func checkUDPMsgIsLegal(msg []byte) bool {
+	frameLen, _ := strconv.ParseInt(hex.EncodeToString(append(msg[:0:0], msg[2:4]...)), 16, 0)
+	if int(frameLen) == len(msg) {
+		return true
+	}
+	logger.Log.Warnln("WARNING !!!!!!!!!! INVALID UDP MESSAGE!")
+	return false
 }
 
 func (c *Client) readFromSocket(buffersize int) {
@@ -43,6 +54,10 @@ func (c *Client) readFromSocket(buffersize int) {
 		}
 		if n > 0 {
 			pack := packet{b[0:n], addr}
+			//合法性检测
+			if !CheckMsg(pack.bytes) || !checkUDPMsgIsLegal(pack.bytes) {
+				continue
+			}
 			select {
 			case c.packets <- pack:
 				continue
@@ -60,8 +75,6 @@ func (c *Client) readFromSocket(buffersize int) {
 		}
 	}
 }
-
- 
 
 // 回了ack的话就更新缓存中的时间
 // 修改一下其中的序列号即可重新发送
@@ -90,14 +103,25 @@ func (c *Client) processPackets() {
 		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalGetPort { //终端端口获取
 			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalReportPort + DataMsgType.DownMsg.TerminalGetPort
 			c.msgType <- message
-		} else {
-			//todo 尚未知道
+		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalInfoDown { //2101下行命令
+			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalInfoUp + DataMsgType.DownMsg.TerminalInfoDown
+			c.msgType <- message
+		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalSvcDiscoverReq { //2211 终端服务发现
+			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalSvcDiscoverRsp + DataMsgType.DownMsg.TerminalSvcDiscoverReq
+			c.msgType <- message
+		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalPortBindReq { //2207终端端口绑定
+			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalPortBindRsp + DataMsgType.DownMsg.TerminalPortBindReq
+			c.msgType <- message
+		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalAccessReq { //220f允许入网
+			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalAccessRsp + DataMsgType.DownMsg.TerminalAccessReq
+			c.msgType <- message
 		}
 	}
 }
 
 // 产生设备，这里会复用T320M的设备信息，
 // 并且构建新的客户端列表
+// 目前支持255个设备 目前支持255设备
 func GenMode(nums int) []TerminalInfo {
 	defer func() {
 		err := recover()
@@ -111,14 +135,18 @@ func GenMode(nums int) []TerminalInfo {
 		sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
 		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
 		TnfGroup[i] = TerminalInfo{}
-		TnfGroup[i].FirstAddr = getRand(40, false) //模拟终端设备序列号
-		Mac, ok := common.DevSNwithMac.Load(devSN + "M")
-		if !ok {
-			TnfGroup[i].ThirdAddr = getRand(12, false)
+		stringOfDev := ""
+		for _, v := range devSN {
+			tempB := int64(byte(v))
+			tempStr := strconv.FormatInt(tempB, 16)
+			stringOfDev += tempStr
 		}
-		realMac := Mac.(string)
+		TnfGroup[i].FirstAddr = stringOfDev
+		mac, _ := common.DevSNwithMac.Load(devSN + "M")
+		realMac := mac.(string)
+		devEUI := []byte{byte(i), 67, 234, 45, 67, 34, 122, 133}
 		TnfGroup[i].ThirdAddr = realMac
-		TnfGroup[i].IotModule = getRand(2, true)
+		TnfGroup[i].IotModule = "01"
 		TnfGroup[i].SecondAddr = TnfGroup[i].FirstAddr
 		TnfGroup[i].key = TnfGroup[i].FirstAddr
 		TnfGroup[i].Client = NewClient()
@@ -126,6 +154,7 @@ func GenMode(nums int) []TerminalInfo {
 		TnfGroup[i].msgType = make(chan string)
 		TnfGroup[i].Client.clientname = "TerminalInfo" + strconv.Itoa(i)
 		TnfGroup[i].devSN = devSN
+		TnfGroup[i].DevEUI = hex.EncodeToString(devEUI)
 		ClientForEveryMsg.Store(TnfGroup[i].Client.clientname, freecache.NewCache(5*1024*1024))
 		MsgAllClientPayload.Store(TnfGroup[i].Client.clientname, freecache.NewCache(5*1024*1024))
 	}
@@ -145,7 +174,7 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 			logger.Log.Errorln("/udpclient/sendMsg: send message procedure exist problem, errors' are", err)
 		}
 	}()
-	for msg := range c.msgType { //主动发起保活、处理上行报文的时候，发送的消息都需要ack处理,)
+	for msg := range c.msgType {
 		go func() {
 			prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), strings.Repeat(msg[8:], 1)
 			if msgType == DataMsgType.UpMsg.KeepAliveEvent { //主动保活
@@ -172,21 +201,46 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 					}
 					FrameSN = makeHex(FrameSN, 4)
 					prepareSend = CreateNewMsg(FrameSN, msgLoad)
-					msgCache.(*freecache.Cache).Del([]byte(cacheKey)) //清理缓存
+					msgCache.(*freecache.Cache).Del([]byte(cacheKey))
 					fcache.(*freecache.Cache).Del([]byte(cacheKey))
-					time.Sleep(time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)) //重新生成消息后再清理缓存
+					time.Sleep(time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)) //间隔
 				}
-			} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent { 
+			} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent {
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalJoin message")
 				prepareSend = encMsg(msgType, Terminal, FrameSN, "")
-			} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { 
+			} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent {
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalLeave message")
 				prepareSend = encMsg(msgType, Terminal, FrameSN, "")
 			} else if msgType == DataMsgType.UpMsg.TerminalReportPort { //收到终端上报数据时, 需要主动回复ack
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalReportPort")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalGetPort, FrameSN, c, Terminal)
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalReportPort message")
+				msgLoad = ""
 				prepareSend = encMsg(DataMsgType.UpMsg.TerminalReportPort, Terminal, FrameSN, msgLoad)
+			} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //一联开关下发回复准备
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalInfoUp")
+				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalInfoDown, FrameSN, c, Terminal)
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalInfoUp message")
+				msgLoad = ""
+				prepareSend = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+			} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp { //终端服务发现回复
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalSvcDiscoverRsp")
+				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalSvcDiscoverReq, FrameSN, c, Terminal)
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalSvcDiscoverRsp message")
+				msgLoad = ""
+				prepareSend = encMsg(DataMsgType.UpMsg.TerminalSvcDiscoverRsp, Terminal, FrameSN, msgLoad)
+			} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp { //终端端口绑定
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalPortBindRsp")
+				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalPortBindReq, FrameSN, c, Terminal)
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalPortBindRsp message")
+				msgLoad = ""
+				prepareSend = encMsg(DataMsgType.UpMsg.TerminalPortBindRsp, Terminal, FrameSN, msgLoad)
+			} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp { //终端入网许可
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalAccessRsp")
+				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalAccessReq, FrameSN, c, Terminal)
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalAccessRsp message")
+				msgLoad = ""
+				prepareSend = encMsg(DataMsgType.UpMsg.TerminalAccessRsp, Terminal, FrameSN, msgLoad)
 			}
 			byteOfPrepareSend, _ := hex.DecodeString(prepareSend)
 			_, err := c.Connection.Write(byteOfPrepareSend)
@@ -212,7 +266,7 @@ func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, key string) {
 	if resendTime == 4 {
 		return
 	}
-	timer := time.NewTimer((time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME))) //每15秒重发
+	timer := time.NewTimer((time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)))
 	defer timer.Stop()
 	<-timer.C
 	msgCache, hasClient := MsgAllClientPayload.Load(c.clientname)
@@ -231,7 +285,7 @@ func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, key string) {
 		}
 		_, errIn = c.Connection.Write(byteOfPresend)
 		if errIn != nil {
-			logger.Log.Errorln("/udpclient/reSendMsg: The connection", c.clientname, " is disconnected")
+			logger.Log.Errorln("/udpclient/reSendMsg: The connection", c.clientname, "is disconnected")
 			c.Kill <- true
 			return
 		}

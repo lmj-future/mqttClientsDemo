@@ -23,6 +23,8 @@ const (
 	SET_IOT_NODE_CFG = "setIotNodeCfg"
 	SET_IOT_MOD_CFG  = "setIotModCfg"
 
+	ZIGBEE_PERMIT_JOIN = "zigbeePermitJoin"
+
 	// 上行devOption
 	DEV_UPGRADE_PROGRESS_UP = "devUpgradeProgressUp"
 

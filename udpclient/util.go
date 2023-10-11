@@ -14,7 +14,6 @@ import (
 	"github.com/lmj/mqtt-clients-demo/logger"
 )
 
-// 0102005219bc03343231393830314132365538323041453030305735343231393830314132365538323041453030305735063cd2e5bb07dc001105543332304d00000000200700420000ffffffff000f347a
 func errorCheck(err error, where string, kill bool) {
 	if err != nil {
 		if kill {
@@ -25,11 +24,9 @@ func errorCheck(err error, where string, kill bool) {
 	}
 }
 
-
-//当前消息,key表示三级地址的串联，中间需要配置
-//只需要管模拟和记录即可
-//该函数需要适配不同的消息类型1，2，3，4分别对应相关的需求命令
-//payload的使用，实在构造回复消息的时作为消息载体存在
+// 当前消息,key表示三级地址的串联，中间需要配置
+// payload的使用，实在构造回复消息的时作为消息载体存在
+// 终端网络地址也要设备进行标识
 func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) string {
 	var (
 		msg     strings.Builder
@@ -42,45 +39,67 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) st
 	msg.WriteString(dev.FirstAddr)
 	msg.WriteString("34")
 	msg.WriteString(dev.SecondAddr)
-	randMsg = getRand(4, false) //模拟消息载体信息
-	if msgType == DataMsgType.UpMsg.KeepAliveEvent || msgType == DataMsgType.GeneralAck {  //基本保活
+	randMsg = GetRand(4, false)                                                           //模拟消息载体信息
+	if msgType == DataMsgType.UpMsg.KeepAliveEvent || msgType == DataMsgType.GeneralAck { //基本保活
 		msg.WriteString("06")
 		mMac, _ := common.DevSNwithMac.Load(dev.devSN + "M")
 		msg.WriteString(mMac.(string))
-
 	} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent { //终端入网
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
-		randMsg = "86d3" + gmac.(string) + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
-	} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网
+		randMsg = "86d3" + dev.DevEUI + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
+	} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网(需要带设备标识)
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
-		randMsg = "86d3" + gmac.(string) + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
-	} else if msgType == "2206" { //终端端口汇报
+		randMsg = dev.DevEUI //设备标识
+	} else if msgType == DataMsgType.UpMsg.TerminalReportPort {
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//profile编号，终端网络地址，状态成功，终端网络的地址，终端端口数量，终端端口列表
 		randMsg = "0104" + "86d3" + "00" + "86d3" + "01" + "01"
+	} else if msgType == DataMsgType.UpMsg.TerminalInfoUp {
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		randMsg = "010400000000" + "86d3" + "0101008300de630000004118370100000020020100002011020086030000201004000042064865696d616e0500004209536d617274506c75670600004209323031382e312e31310700003001"
+	} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp {
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		//Profile, 发送消息设备网络地址，状态成功，终端网络, 后续消息长度(不含自身，不含crc),终端端口，profile,终端类型id,终端版本，终端Incluster数量, Incluster列表，out数量，out列表
+		randMsg = "0104" + "86d3" + "00" + "86d3" + "1a" + "01" + "0104" + "0051" + "00" + "07" + "0000000300040006000907020b040203001900"
+	} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp {
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		//Profile, 网络地址，状态
+		randMsg = "0104" + "86d3" + "00"
+	} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp {
+		msg.WriteString("08")
+		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
+		msg.WriteString(gmac.(string))
+		//Profile, 网络地址，状态
+		randMsg = "0104" + "86d3" + "00"
 	}
 	msg.WriteString("0011")       //默认
 	msg.WriteString("05")         //默认
-	msg.WriteString("543332304d") //T320M标识
+	msg.WriteString("543332304d") //T320M
 	//消息头信息
 	msg.WriteString("0000")  //控制域
 	msg.WriteString("0000")  //紧跟控制域的序列号暂时没什么用
 	msg.WriteString(msgType) //消息类型
 	//消息体信息
-	msg.WriteString(dev.IotModule) //物联网模组id
-	msg.WriteString("42")          //控制字H3C归一化报文
-	msg.WriteString("86d3")        //地址信息
-	msg.WriteString("")            //子地址
-	msg.WriteString("")            //端口ID
-	msg.WriteString("ffffffff")    //厂商topic
+	msg.WriteString("01")       //物联网模组id  需要更改
+	msg.WriteString("42")       //控制字H3C归一化报文
+	msg.WriteString("86d3")     //地址信息
+	msg.WriteString("")         //子地址
+	msg.WriteString("")         //端口ID
+	msg.WriteString("ffffffff") //厂商topic
 	if payLoad == "" {
-		msg.WriteString(randMsg)       //消息信息
+		msg.WriteString(randMsg) //消息信息
 	} else {
 		msg.WriteString(payLoad)
 	}
@@ -109,7 +128,7 @@ func Check(msg []byte) bool {
 }
 
 // 随机生成序列
-func getRand(length int, isDigit bool) string {
+func GetRand(length int, isDigit bool) string {
 	time.Sleep(time.Nanosecond)
 	if length < 1 {
 		logger.Log.Errorln("范围有误!")
@@ -169,11 +188,10 @@ func KeepAliveTimerFreeCacheGet(key, client string) (int64, error) {
 	value, err := fcache.(*freecache.Cache).Get([]byte(key))
 	if err != nil {
 		return 0, err
-	} 
+	}
 	updateTime, err = strconv.ParseInt(string(value), 10, 64)
 	return updateTime, err
 }
-
 
 // real自增后转化成sz长度的字符串
 func makeHex(real string, sz int) string {
@@ -193,6 +211,5 @@ func CreateNewMsg(FrameSN string, Msg []byte) string {
 	Msg[4], Msg[5] = byteOfSN[0], byteOfSN[1]
 	byteofCRC, _ := hex.DecodeString(CRC(Msg[0 : szOfMsg-2]))
 	Msg[szOfMsg-2], Msg[szOfMsg-1] = byteofCRC[0], byteofCRC[1]
-	return  hex.EncodeToString(Msg)
+	return hex.EncodeToString(Msg)
 }
-

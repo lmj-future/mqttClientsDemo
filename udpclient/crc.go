@@ -1,7 +1,7 @@
-
 package udpclient
 
 import (
+	"encoding/hex"
 	"strconv"
 	"strings"
 )
@@ -23,4 +23,10 @@ func CRC(msg []byte) string {
 	builder.WriteString("0000")
 	builder.WriteString(strconv.FormatInt(int64(crc), 16))
 	return strings.Repeat(builder.String()[builder.Len()-4:], 1)
+}
+
+
+func CheckMsg(msg []byte) bool {
+	return CRC(append(msg[:0:0], msg[:len(msg) - 2]...)) ==
+	hex.EncodeToString(append(msg[:0:0], msg[len(msg) - 2:]...))
 }
