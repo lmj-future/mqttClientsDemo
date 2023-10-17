@@ -49,29 +49,35 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) st
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		randMsg = "86d3" + dev.DevEUI + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
-	} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网(需要带设备标识)
+	} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
-		randMsg = dev.DevEUI //设备标识
-	} else if msgType == DataMsgType.UpMsg.TerminalReportPort {
+		randMsg = dev.DevEUI
+	} else if msgType == DataMsgType.UpMsg.TerminalReportPort { //终端上报
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//profile编号，终端网络地址，状态成功，终端网络的地址，终端端口数量，终端端口列表
 		randMsg = "0104" + "86d3" + "00" + "86d3" + "01" + "01"
-	} else if msgType == DataMsgType.UpMsg.TerminalInfoUp {
+	} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //回应下发命令
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
-		randMsg = "010400000000" + "86d3" + "0101008300de630000004118370100000020020100002011020086030000201004000042064865696d616e0500004209536d617274506c75670600004209323031382e312e31310700003001"
+		profileId, clusterId, zclData := "", "", ""
+		if payLoad[:7] == "REGULAR" {
+			profileId, clusterId, zclData = "0104", "0006", payLoad[7:]
+		} else {
+			profileId, clusterId, zclData = payLoad[0:4], payLoad[4:8], payLoad[10:]
+		}
+		randMsg = CreatePreUpData(profileId, clusterId, "86d3", zclData, dev) //86d3早晚需要被替代掉
 	} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp {
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//Profile, 发送消息设备网络地址，状态成功，终端网络, 后续消息长度(不含自身，不含crc),终端端口，profile,终端类型id,终端版本，终端Incluster数量, Incluster列表，out数量，out列表
 		randMsg = "0104" + "86d3" + "00" + "86d3" + "1a" + "01" + "0104" + "0051" + "00" + "07" + "0000000300040006000907020b040203001900"
-	} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp {
+	} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp { //终端绑定端口回复
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
@@ -98,10 +104,10 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) st
 	msg.WriteString("")         //子地址
 	msg.WriteString("")         //端口ID
 	msg.WriteString("ffffffff") //厂商topic
-	if payLoad == "" {
-		msg.WriteString(randMsg) //消息信息
-	} else {
+	if len(payLoad) == 4 {      //ack应答专用
 		msg.WriteString(payLoad)
+	} else {
+		msg.WriteString(randMsg)
 	}
 	message := generateLenOfMsg(msg)
 	b, _ := hex.DecodeString(message)
@@ -212,4 +218,99 @@ func CreateNewMsg(FrameSN string, Msg []byte) string {
 	byteofCRC, _ := hex.DecodeString(CRC(Msg[0 : szOfMsg-2]))
 	Msg[szOfMsg-2], Msg[szOfMsg-1] = byteofCRC[0], byteofCRC[1]
 	return hex.EncodeToString(Msg)
+}
+
+// 回复PayLoad
+func CreatePreUpData(p, c, addr, zclData string, Ter TerminalInfo) string {
+	var (
+		tempString   strings.Builder
+		tempInString strings.Builder
+	)
+	tempString.WriteString(p)
+	tempString.WriteString("0000") //gp
+	tempString.WriteString(c)
+	tempString.WriteString(addr)
+	tempString.WriteString("01") //源终端端口
+	tempString.WriteString("01") //目的终端端口
+	tempString.WriteString("00") //wasBroadcast 广播
+	tempString.WriteString("83") //连接质量
+	tempString.WriteString("00") //安全使用
+	timestamp := time.Now().Unix()
+	byteTimestamp := []byte{
+		byte(timestamp & 0xFF),
+		byte((timestamp >> 8) & 0xFF),
+		byte((timestamp >> 16) & 0xFF),
+		byte((timestamp >> 24) & 0xFF),
+	}
+	tempString.WriteString(hex.EncodeToString(byteTimestamp)) //时间戳
+	tempString.WriteString("00")                              //传递序列符号
+	zclHeader := common.ZclHeader{
+		FrameCtrl:      zclData[0:2],
+		TransactionSec: zclData[2:4],
+		CommandIdent:   zclData[4:6],
+	}
+	zclRspHeader := common.ZclHeader{
+		TransactionSec: zclHeader.TransactionSec,
+	}
+	postZclData := procReadBasic(zclData, c, 6)
+	switch zclHeader.CommandIdent {
+	case "00":
+		zclRspHeader.FrameCtrl = "18"
+		zclRspHeader.CommandIdent = "01"
+	case "06":
+		zclRspHeader.FrameCtrl = "08"
+		zclRspHeader.CommandIdent = "07"
+		go func() {
+			interval, _ := strconv.ParseInt(zclData[16:18]+zclData[14:16], 16, 32)
+			ticker := time.NewTicker(time.Duration(interval/10) * time.Second)
+			ZclRegularReport++
+			for {
+				select {
+				case <-ticker.C:
+					//理论上应当采用保活帧序列号，但此处使用新起始号，zcl封装信息固定，但
+					s := strconv.FormatInt(int64(ZclRegularReport), 16)
+					logger.Log.Infoln("/udpclient/CreatePreUpData start regular send message!")
+					if len(s) < 2 {
+						s = "0" + s
+					}
+					message := "0000" + DataMsgType.UpMsg.TerminalInfoUp + "REGULAR" + "08" + s + "0a" + "00001001"
+					Ter.Client.msgType <- message
+				default:
+					continue
+				}
+			}
+		}()
+		postZclData = "00" //这种情况下封装一个确认即可
+	// case "0b": 存在问题
+	// 	zclRspHeader.FrameCtrl = "08"
+	// 	zclRspHeader.CommandIdent = "07"
+	case "0a":
+		zclRspHeader.FrameCtrl = zclHeader.FrameCtrl
+		zclRspHeader.CommandIdent = zclHeader.CommandIdent
+		postZclData = zclData[6:]
+	default:
+		logger.Log.Errorln("/udpclient/encMsg can't recogenize the zcl message!")
+	}
+	tempInString.WriteString(zclRspHeader.FrameCtrl)
+	tempInString.WriteString(zclRspHeader.TransactionSec)
+	tempInString.WriteString(zclRspHeader.CommandIdent)
+	tempInString.WriteString(postZclData)
+	ZclCmd := strconv.FormatInt(int64(len(tempInString.String())/2), 16)
+	if len(ZclCmd) < 2 {
+		ZclCmd = "0" + ZclCmd
+	}
+	tempString.WriteString(ZclCmd)
+	tempString.WriteString(tempInString.String())
+	return tempString.String()
+}
+
+// 处理普通读请求操作，没有就空
+func procReadBasic(zclData, cluster string, preFix int) string {
+	n := len(zclData)
+	var result strings.Builder
+	for i := preFix; i < n && i+4 <= n; i += 4 {
+		curRead := zclData[i : i+4]
+		result.WriteString(curRead + string(common.ClusterToAttr[cluster][curRead].Msgstatus) + string(common.ClusterToAttr[cluster][curRead].MsgAttrDataType) + string(common.ClusterToAttr[cluster][curRead].MsgValue))
+	}
+	return result.String()
 }

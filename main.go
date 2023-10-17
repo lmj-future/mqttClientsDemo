@@ -123,7 +123,7 @@ func mqttConnectFirst(sig chan os.Signal, timestamp string) bool {
 	wg := &sync.WaitGroup{}
 	wg.Add(config.DEVICE_TOTAL_COUNT)
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
-		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i) //唯一设备对应唯一
+		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
 		randomGMAC := []byte{80,98,62,152,123,84,117,byte(i)}
 		GMac := hex.EncodeToString(randomGMAC)
 		modMAC := []byte{80,98,62,152,123,byte(i)}

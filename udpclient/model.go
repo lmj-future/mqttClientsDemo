@@ -43,7 +43,7 @@ type UpMsg struct {
 	TerminalReportPort     string
 	TerminalInfoUp         string
 	TerminalSvcDiscoverRsp string //终端服务发现回复
-	TerminalPortBindRsp    string
+	TerminalPortBindRsp    string //终端端口绑定
 	TerminalAccessRsp      string //终端允许入网回复
 }
 

@@ -104,7 +104,7 @@ func (c *Client) processPackets() {
 			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalReportPort + DataMsgType.DownMsg.TerminalGetPort
 			c.msgType <- message
 		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalInfoDown { //2101下行命令
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalInfoUp + DataMsgType.DownMsg.TerminalInfoDown
+			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalInfoUp + jsoninfo.MessagePayload.Data
 			c.msgType <- message
 		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalSvcDiscoverReq { //2211 终端服务发现
 			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalSvcDiscoverRsp + DataMsgType.DownMsg.TerminalSvcDiscoverReq
@@ -176,7 +176,10 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 	}()
 	for msg := range c.msgType {
 		go func() {
-			prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), strings.Repeat(msg[8:], 1)
+			prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), ""
+			if len(msg) > 8 {
+				msgLoad = strings.Repeat(msg[8:], 1)
+			}
 			if msgType == DataMsgType.UpMsg.KeepAliveEvent { //主动保活
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc keepalive message")
 				cacheKey := FrameSN + msgType
@@ -217,12 +220,16 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalReportPort message")
 				msgLoad = ""
 				prepareSend = encMsg(DataMsgType.UpMsg.TerminalReportPort, Terminal, FrameSN, msgLoad)
-			} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //一联开关下发回复准备
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalInfoUp")
-				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalInfoDown, FrameSN, c, Terminal)
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalInfoUp message")
-				msgLoad = ""
-				prepareSend = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+			} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //一联开关下发回复准备，这里内部再走一个分支，此时传入的payload就直接是要上送的payload信息
+				if msgLoad[0:7] == "REGULAR" {
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send Regular report about TerminalInfoUp")
+					prepareSend = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+				} else {
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalInfoUp")
+					go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalInfoDown, FrameSN, c, Terminal)
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalInfoUp message")
+					prepareSend = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+				}
 			} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp { //终端服务发现回复
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalSvcDiscoverRsp")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalSvcDiscoverReq, FrameSN, c, Terminal)
@@ -277,7 +284,7 @@ func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, key string) {
 	data, err := msgCache.(*freecache.Cache).Get([]byte(key))
 	if err == nil {
 		preSend := hex.EncodeToString(data)
-		logger.Log.Warnln("/udpclient/reSendMsg: Devui:", key, "Generate ReSend Message", resendTime, "Times")
+		logger.Log.Warnln("/udpclient/reSendMsg:", preSend, "Generate ReSend Message", resendTime, "Times")
 		byteOfPresend, errIn := hex.DecodeString(preSend)
 		if errIn != nil {
 			logger.Log.Errorln("/udpclient/reSendMsg: ReDecode is Fail, Illegal Message!")
