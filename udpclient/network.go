@@ -115,6 +115,11 @@ func (c *Client) processPackets() {
 		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalAccessReq { //220f允许入网
 			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalAccessRsp + DataMsgType.DownMsg.TerminalAccessReq
 			c.msgType <- message
+		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalWholeNetReq { //2203拓扑网络请求,失败
+			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.ZigbeeGeneralFailed + DataMsgType.DownMsg.TerminalWholeNetReq
+			c.msgType <- message
+		} else {
+			logger.Log.Warnln("/udpclient/processPackets receive unknown message! please check!")
 		}
 	}
 }
@@ -174,6 +179,7 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 			logger.Log.Errorln("/udpclient/sendMsg: send message procedure exist problem, errors' are", err)
 		}
 	}()
+	var errString error
 	for msg := range c.msgType {
 		go func() {
 			prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), ""
@@ -193,7 +199,7 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 					return
 				}
 				if FrameSN == DataMsgType.UpMsg.StartEvent && err != nil && err1 != nil { //没缓存且首次发送
-					prepareSend = encMsg(msgType, Terminal, FrameSN, "")
+					prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: first generate message!")
 				} else { //非首次内容则需要缓存提取，仅保活消息
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: again generate message!")
@@ -210,44 +216,54 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 				}
 			} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent {
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalJoin message")
-				prepareSend = encMsg(msgType, Terminal, FrameSN, "")
+				prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
 			} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent {
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalLeave message")
-				prepareSend = encMsg(msgType, Terminal, FrameSN, "")
+				prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
 			} else if msgType == DataMsgType.UpMsg.TerminalReportPort { //收到终端上报数据时, 需要主动回复ack
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalReportPort")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalGetPort, FrameSN, c, Terminal)
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalReportPort message")
 				msgLoad = ""
-				prepareSend = encMsg(DataMsgType.UpMsg.TerminalReportPort, Terminal, FrameSN, msgLoad)
+				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalReportPort, Terminal, FrameSN, msgLoad)
 			} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //一联开关下发回复准备，这里内部再走一个分支，此时传入的payload就直接是要上送的payload信息
 				if msgLoad[0:7] == "REGULAR" {
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send Regular report about TerminalInfoUp")
-					prepareSend = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+					prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
 				} else {
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalInfoUp")
 					go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalInfoDown, FrameSN, c, Terminal)
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalInfoUp message")
-					prepareSend = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+					prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
 				}
 			} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp { //终端服务发现回复
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalSvcDiscoverRsp")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalSvcDiscoverReq, FrameSN, c, Terminal)
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalSvcDiscoverRsp message")
 				msgLoad = ""
-				prepareSend = encMsg(DataMsgType.UpMsg.TerminalSvcDiscoverRsp, Terminal, FrameSN, msgLoad)
+				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalSvcDiscoverRsp, Terminal, FrameSN, msgLoad)
 			} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp { //终端端口绑定
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalPortBindRsp")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalPortBindReq, FrameSN, c, Terminal)
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalPortBindRsp message")
 				msgLoad = ""
-				prepareSend = encMsg(DataMsgType.UpMsg.TerminalPortBindRsp, Terminal, FrameSN, msgLoad)
+				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalPortBindRsp, Terminal, FrameSN, msgLoad)
 			} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp { //终端入网许可
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalAccessRsp")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalAccessReq, FrameSN, c, Terminal)
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalAccessRsp message")
 				msgLoad = ""
-				prepareSend = encMsg(DataMsgType.UpMsg.TerminalAccessRsp, Terminal, FrameSN, msgLoad)
+				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalAccessRsp, Terminal, FrameSN, msgLoad)
+			} else if msgType == DataMsgType.UpMsg.TerminalWholeNetRsp { //拓扑网络请求
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalWholeNetRsp")
+				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalWholeNetReq, FrameSN, c, Terminal)
+				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalWholeNetRsp message")
+				msgLoad = DataMsgType.UpMsg.TerminalWholeNetRsp
+				prepareSend, errString = encMsg(DataMsgType.ZigbeeGeneralFailed, Terminal, FrameSN, msgLoad)
+			}
+			if errString != nil {
+				logger.Log.Errorln(errString)
+				return
 			}
 			byteOfPrepareSend, _ := hex.DecodeString(prepareSend)
 			_, err := c.Connection.Write(byteOfPrepareSend)
@@ -304,9 +320,13 @@ func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, key string) {
 仅用于设备侧的ack消息回复
 */
 func sendACK(msgType, load, FrameSN string, c *Client, ter TerminalInfo) {
-	prepareMsg := encMsg(msgType, ter, FrameSN, load)
+	prepareMsg, err := encMsg(msgType, ter, FrameSN, load)
+	if err != nil {
+		logger.Log.Errorln("udpclient/sendAck/ can't gengerate msg!")
+		return
+	}
 	byteOfPrepareSend, _ := hex.DecodeString(prepareMsg)
-	_, err := c.Connection.Write(byteOfPrepareSend)
+	_, err = c.Connection.Write(byteOfPrepareSend)
 	if err != nil {
 		logger.Log.Errorln("/udpclient/sendACK: The connection", c.clientname, "is disconnected")
 		c.Kill <- true

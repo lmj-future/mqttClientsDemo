@@ -434,6 +434,12 @@ func stop(sig chan os.Signal) {
 		default:
 			break
 		}
+		select {
+		case udpclient.RegularCh <- true:
+			logger.Log.Infoln("/Closing regular send msg")
+		default:
+			break
+		}
 		time.Sleep(time.Second)
 		logger.Log.Infoln("所有资源已销毁")
 	} else {

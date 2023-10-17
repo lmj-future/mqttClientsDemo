@@ -10,10 +10,15 @@ import (
 	"github.com/lmj/mqtt-clients-demo/logger"
 )
 
-var TnfGroup []TerminalInfo
-var ServerCh chan bool
-var ReStart int = -1 
-var ZclRegularReport int = -1 //定时上报的帧序列号
+var (
+	TnfGroup         []TerminalInfo
+	ServerCh         chan bool //udp服务关闭
+	RegularCh        chan bool //定时上报
+	ReStart          int = -1
+	ZclRegularReport int = -1 //定时上报的帧序列号
+
+)
+
 // 该地方留给触发按键
 func StartUDP(sig chan os.Signal, timestamp string) {
 	ServerCh = make(chan bool)

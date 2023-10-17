@@ -17,21 +17,25 @@ func init() {
 	DataMsgType.UpMsg.TerminalSvcDiscoverRsp = "2212"
 	DataMsgType.UpMsg.TerminalPortBindRsp = "2208"
 	DataMsgType.UpMsg.TerminalAccessRsp = "2210"
-
+	DataMsgType.UpMsg.TerminalWholeNetRsp = "2204"
+	
 	DataMsgType.DownMsg.NeedAck = "1111"
 	DataMsgType.DownMsg.TerminalGetPort = "2205"
 	DataMsgType.DownMsg.TerminalInfoDown = "2101"
 	DataMsgType.DownMsg.TerminalSvcDiscoverReq = "2211"
 	DataMsgType.DownMsg.TerminalPortBindReq = "2207"
 	DataMsgType.DownMsg.TerminalAccessReq = "220f"
+	DataMsgType.DownMsg.TerminalWholeNetReq = "2203"
 
 	DataMsgType.GeneralAck = "2006"
+	DataMsgType.ZigbeeGeneralFailed = "2008"
 }
 
 type MessageType struct {
 	UpMsg      UpMsg
 	DownMsg    DownMsg
 	GeneralAck string
+	ZigbeeGeneralFailed string
 }
 
 type UpMsg struct {
@@ -45,6 +49,7 @@ type UpMsg struct {
 	TerminalSvcDiscoverRsp string //终端服务发现回复
 	TerminalPortBindRsp    string //终端端口绑定
 	TerminalAccessRsp      string //终端允许入网回复
+	TerminalWholeNetRsp    string //拓扑网络回复
 }
 
 type DownMsg struct {
@@ -54,6 +59,7 @@ type DownMsg struct {
 	TerminalSvcDiscoverReq string //终端服务发现请求
 	TerminalPortBindReq    string //终端端口绑定
 	TerminalAccessReq      string //终端允许入网
+	TerminalWholeNetReq    string //拓扑网络请求
 }
 
 // some bytes associated with an address
