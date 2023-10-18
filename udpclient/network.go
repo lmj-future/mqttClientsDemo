@@ -1,6 +1,7 @@
 package udpclient
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -139,17 +140,19 @@ func GenMode(nums int) []TerminalInfo {
 	for i := 0; i < nums; i++ {
 		sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
 		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
-		TnfGroup[i] = TerminalInfo{}
 		stringOfDev := ""
 		for _, v := range devSN {
 			tempB := int64(byte(v))
 			tempStr := strconv.FormatInt(tempB, 16)
 			stringOfDev += tempStr
 		}
-		TnfGroup[i].FirstAddr = stringOfDev
 		mac, _ := common.DevSNwithMac.Load(devSN + "M")
 		realMac := mac.(string)
 		devEUI := []byte{byte(i), 67, 234, 45, 67, 34, 122, 133}
+		ip := make([]byte, 2)
+		rand.Read(ip)
+		TnfGroup[i] = TerminalInfo{}
+		TnfGroup[i].FirstAddr = stringOfDev
 		TnfGroup[i].ThirdAddr = realMac
 		TnfGroup[i].IotModule = "01"
 		TnfGroup[i].SecondAddr = TnfGroup[i].FirstAddr
@@ -160,6 +163,7 @@ func GenMode(nums int) []TerminalInfo {
 		TnfGroup[i].Client.clientname = "TerminalInfo" + strconv.Itoa(i)
 		TnfGroup[i].devSN = devSN
 		TnfGroup[i].DevEUI = hex.EncodeToString(devEUI)
+		TnfGroup[i].IP = hex.EncodeToString(ip)
 		ClientForEveryMsg.Store(TnfGroup[i].Client.clientname, freecache.NewCache(5*1024*1024))
 		MsgAllClientPayload.Store(TnfGroup[i].Client.clientname, freecache.NewCache(5*1024*1024))
 	}
@@ -258,7 +262,7 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalWholeNetRsp")
 				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalWholeNetReq, FrameSN, c, Terminal)
 				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalWholeNetRsp message")
-				msgLoad = DataMsgType.UpMsg.TerminalWholeNetRsp
+				msgLoad = msgType
 				prepareSend, errString = encMsg(DataMsgType.ZigbeeGeneralFailed, Terminal, FrameSN, msgLoad)
 			}
 			if errString != nil {
@@ -267,12 +271,12 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 			}
 			byteOfPrepareSend, _ := hex.DecodeString(prepareSend)
 			_, err := c.Connection.Write(byteOfPrepareSend)
-			logger.Log.Infoln("/udpclient/sendMsg: DevEUI:", Terminal.key, "/udpclient/sendMsg , the msg content is :", prepareSend)
 			if err != nil {
 				logger.Log.Errorln("/udpclient/sendMsg: The connection", c.clientname, "is disconnected")
 				c.Kill <- true
 				return
 			}
+			logger.Log.Infoln("/udpclient/sendMsg: DevEUI:", Terminal.key, "/udpclient/sendMsg , the msg content is :", prepareSend)
 			updateTime, keyOfSend := time.Now().UnixNano(), FrameSN+msgType
 			fcache, _ := ClientForEveryMsg.Load(c.clientname)
 			fcache.(*freecache.Cache).Set([]byte(keyOfSend), []byte(strconv.FormatInt(updateTime, 10)), config.UDP_ALIVE_CHECK_TIME*5)

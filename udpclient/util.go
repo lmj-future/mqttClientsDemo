@@ -27,11 +27,11 @@ func errorCheck(err error, where string, kill bool) {
 // 当前消息,key表示三级地址的串联，中间需要配置
 // payload的使用，实在构造回复消息的时作为消息载体存在
 // 终端网络地址也要设备进行标识
-func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (string,error) {
+func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (string, error) {
 	var (
 		msg     strings.Builder
 		randMsg string
-		err error
+		err     error
 	)
 	msg.WriteString(config.UDP_VERSION_TYPE) //消息版本
 	msg.WriteString(FrameSN)
@@ -40,7 +40,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 	msg.WriteString(dev.FirstAddr)
 	msg.WriteString("34")
 	msg.WriteString(dev.SecondAddr)
-	randMsg = GetRand(4, false)                                                           //模拟消息载体信息
+	randMsg = GetRand(4, false)                                                          
 	if msgType == DataMsgType.UpMsg.KeepAliveEvent || msgType == DataMsgType.GeneralAck { //基本保活
 		msg.WriteString("06")
 		mMac, _ := common.DevSNwithMac.Load(dev.devSN + "M")
@@ -49,7 +49,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
-		randMsg = "86d3" + dev.DevEUI + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
+		randMsg = dev.IP + dev.DevEUI + "8e" + "00" //终端地址，设备标识，设备功能，入网方式
 	} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent { //终端离网
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
@@ -60,7 +60,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//profile编号，终端网络地址，状态成功，终端网络的地址，终端端口数量，终端端口列表
-		randMsg = "0104" + "86d3" + "00" + "86d3" + "01" + "01"
+		randMsg = "0104" + dev.IP + "00" + dev.IP + "01" + "01"
 	} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //回应下发命令
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
@@ -71,7 +71,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 		} else {
 			profileId, clusterId, zclData = payLoad[0:4], payLoad[4:8], payLoad[10:]
 		}
-		randMsg, err = CreatePreUpData(profileId, clusterId, "86d3", zclData, dev) //86d3早晚需要被替代掉
+		randMsg, err = CreatePreUpData(profileId, clusterId, dev.IP, zclData, dev)
 		if err != nil {
 			return "", err
 		}
@@ -80,24 +80,24 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//Profile, 发送消息设备网络地址，状态成功，终端网络, 后续消息长度(不含自身，不含crc),终端端口，profile,终端类型id,终端版本，终端Incluster数量, Incluster列表，out数量，out列表
-		randMsg = "0104" + "86d3" + "00" + "86d3" + "1a" + "01" + "0104" + "0051" + "00" + "07" + "0000000300040006000907020b040203001900"
+		randMsg = "0104" + dev.IP + "00" + dev.IP + "1a" + "01" + "0104" + "0051" + "00" + "07" + "0000000300040006000907020b040203001900"
 	} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp { //终端绑定端口回复
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//Profile, 网络地址，状态
-		randMsg = "0104" + "86d3" + "00"
+		randMsg = "0104" + dev.IP+ "00"
 	} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp {
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//Profile, 网络地址，状态
-		randMsg = "0104" + "86d3" + "00"
+		randMsg = "0104" + dev.IP + "00"
 	} else if msgType == DataMsgType.ZigbeeGeneralFailed {
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
-		randMsg = payLoad + "00000001" //错误码
+		randMsg = payLoad + "00000001"
 	}
 	msg.WriteString("0011")       //默认
 	msg.WriteString("05")         //默认
@@ -109,7 +109,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 	//消息体信息
 	msg.WriteString("01")       //物联网模组id  需要更改
 	msg.WriteString("42")       //控制字H3C归一化报文
-	msg.WriteString("86d3")     //地址信息
+	msg.WriteString(dev.IP)     //地址信息
 	msg.WriteString("")         //子地址
 	msg.WriteString("")         //端口ID
 	msg.WriteString("ffffffff") //厂商topic
@@ -185,8 +185,6 @@ func procKeepAliveMsgFreeCache(key string, t int, clientName string) {
 					fcache, _ = MsgAllClientPayload.Load(clientName)
 					fcache.(*freecache.Cache).Del([]byte(key))
 				}
-			} else if err.Error() != "Entry not found" {
-				logger.Log.Warnln("/udpclient/procKeepAliveMsgFreeCache", err)
 			}
 		}
 	}
@@ -198,7 +196,7 @@ func KeepAliveTimerFreeCacheGet(key, client string) (int64, error) {
 	var err error
 	fcache, ok := ClientForEveryMsg.Load(client)
 	if !ok {
-		return 0, fmt.Errorf("Connect has Interrupted")
+		return 0, fmt.Errorf("connect has Interrupted")
 	}
 	value, err := fcache.(*freecache.Cache).Get([]byte(key))
 	if err != nil {
@@ -269,28 +267,8 @@ func CreatePreUpData(p, c, addr, zclData string, Ter TerminalInfo) (string, erro
 	case "06":
 		zclRspHeader.FrameCtrl = "08"
 		zclRspHeader.CommandIdent = "07"
-		go func() {
-			interval, _ := strconv.ParseInt(zclData[16:18]+zclData[14:16], 16, 32)
-			ticker := time.NewTicker(time.Duration(interval/10) * time.Second)
-			ZclRegularReport++
-			for {
-				select {
-				case <-ticker.C:
-					//理论上应当采用保活帧序列号，但此处使用新起始号，zcl封装信息固定
-					s := strconv.FormatInt(int64(ZclRegularReport), 16)
-					logger.Log.Infoln("/udpclient/CreatePreUpData start regular send message!")
-					if len(s) < 2 {
-						s = "0" + s
-					}
-					message := "0000" + DataMsgType.UpMsg.TerminalInfoUp + "REGULAR" + "08" + s + "0a" + "00001001"
-					Ter.Client.msgType <- message
-				case <-RegularCh: //终端定时上报程序
-					return
-				default:
-					continue
-				}
-			}
-		}()
+		interval, _ := strconv.ParseInt(zclData[16:18]+zclData[14:16], 16, 32)
+		go TriTimeReport(int(interval), Ter, true)
 		postZclData = "00" //确认
 	case "0a":
 		zclRspHeader.FrameCtrl = zclHeader.FrameCtrl
@@ -298,11 +276,10 @@ func CreatePreUpData(p, c, addr, zclData string, Ter TerminalInfo) (string, erro
 		postZclData = zclData[6:]
 	default:
 		// case "0b": 存在问题
-	// 	zclRspHeader.FrameCtrl = "08"
-	// 	zclRspHeader.CommandIdent = "07"
+		// 	zclRspHeader.FrameCtrl = "08"
+		// 	zclRspHeader.CommandIdent = "07"
 		return "", fmt.Errorf("/udpclient/encMsg can't recogenize the zcl message")
 	}
-	 
 	tempInString.WriteString(zclRspHeader.FrameCtrl)
 	tempInString.WriteString(zclRspHeader.TransactionSec)
 	tempInString.WriteString(zclRspHeader.CommandIdent)
@@ -325,4 +302,36 @@ func procReadBasic(zclData, cluster string, preFix int) string {
 		result.WriteString(curRead + string(common.ClusterToAttr[cluster][curRead].Msgstatus) + string(common.ClusterToAttr[cluster][curRead].MsgAttrDataType) + string(common.ClusterToAttr[cluster][curRead].MsgValue))
 	}
 	return result.String()
+}
+
+// 该接口适配主动上线功能
+func TriTimeReport(interval int, terminal TerminalInfo, isTicker bool) {
+	ZclRegularReport++
+	zclFrame, message := "", ""
+	zclFrame = strconv.FormatInt(int64(ZclRegularReport), 16)
+	if len(zclFrame) < 2 {
+		zclFrame = "0" + zclFrame
+	}
+	message = "0000" + DataMsgType.UpMsg.TerminalInfoUp + "REGULAR" + "08" + zclFrame + "0a" + "00001001"
+	if isTicker {
+		ticker := time.NewTicker(time.Duration(interval)*time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				//理论上应当采用保活帧序列号，但此处使用新起始号，zcl封装信息固定
+				logger.Log.Infoln("/udpclient/CreatePreUpData start regular send message!")
+				terminal.Client.msgType <- message
+			case value := <-RegularCh: //退出时及时终止
+				if value {
+					ticker.Stop()
+					return
+				}
+			default:
+				continue
+			}
+		}
+	} else {
+		logger.Log.Infoln("/udpclient/CreatePreUpData start regular send message(once)!")
+		terminal.Client.msgType <- message
+	}
 }

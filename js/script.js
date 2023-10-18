@@ -135,16 +135,40 @@ function getTerminalId() {
     return document.getElementById("u250_input").value;
 }
 
+function getTerminalOnline() {
+    return document.getElementById("u251_input")
+}
+
 //绑定点击信息
 //这里还需要发送对应终端的id过去
-function changeTerminalJoiToLeave() {
+function changeTerminalJoinOrLeave() {
     var TerButton = getTerminalJoinOrLeave();
     if (TerButton !== null && TerButton !== undefined) {   
         TerButton.addEventListener('click', function() {       
             var TerId = getTerminalId()
             var xhr = new XMLHttpRequest();
             xhr.open("GET","http://localhost:7777/api/data?id=" + TerId + "&isLeave="+ TerButton.value ,true)
+            xhr.send(); 
             changeButtonStatus(); 
+            if (TerButton.value == "终端离网") {
+                enableTerminalOnlineButton()
+            } else {
+                disableTerminalOnlineButton()
+            }
+        });
+       
+    }
+}
+
+
+//绑定设备上线按钮的
+function changeTerminalOnline() {
+    var TerButton = getTerminalOnline();
+    if (TerButton !== null && TerButton !== undefined) {   
+        TerButton.addEventListener('click', function() {       
+            var TerId = getTerminalId()
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET","http://localhost:7777/api/data?id=" + TerId + "&isLeave="+ TerButton.value ,true)
             xhr.send(); 
         });
     }
@@ -182,10 +206,27 @@ function disableTerminalJoinOrLeaveButton() {
 function enableTerminalJoinOrLeaveButton() {
     var enableButton = getTerminalJoinOrLeave();
     if (enableButton !== null && enableButton !== undefined) {
-        enableButton.style.pointerEvents = 'auto';  // 禁用鼠标事件
-        enableButton.style.opacity = '1';  // 设置按钮透明度为0.5，呈现灰色效果
+        enableButton.style.pointerEvents = 'auto';  // 复用
+        enableButton.style.opacity = '1';  //
     }
 }
+
+//进入界面的时候禁用设备上线
+function disableTerminalOnlineButton() {
+    var disButton = getTerminalOnline();
+    if (disButton !== null && disButton !== undefined) {
+        disButton.style.pointerEvents = 'none';  // 禁用鼠标事件
+        disButton.style.opacity = '0.5';  // 设置按钮透明度为0.5，呈现灰色效果
+    }
+}
+function enableTerminalOnlineButton() {
+    var enableButton = getTerminalOnline();
+    if (enableButton !== null && enableButton !== undefined) {
+        enableButton.style.pointerEvents = 'auto';  // 复用
+        enableButton.style.opacity = '1';  //
+    }
+}
+
 
 function enableStopButton() {
     var stopButton = getStopButton();
@@ -206,6 +247,8 @@ function startButtonEvent() {
             enableStopButton();
             initDropList();
             initTerminalStatus();
+            btn = getTerminalJoinOrLeave()
+            btn.value 
         });
     }
 }
@@ -215,6 +258,7 @@ function stopButtonEvent() {
         stopButton.addEventListener('click', function() {
             // 处理停止按钮的点击事件
             disableTerminalJoinOrLeaveButton();
+            disableTerminalOnlineButton();
             disableStopButton();
             stop(getTimestamp());
             enableStartButton();
@@ -230,19 +274,21 @@ function changeButtonStatus() {
     if (terminalId !== null && terminalId !== undefined) {
         var JoinOrLeavStatus =  hashTable[terminalId.value];
         if (JoinOrLeavStatus !== null && JoinOrLeavStatus !== undefined) {
-            hashTable[terminalId.value] = JoinOrLeavStatus === "模拟终端入网" ? "模拟终端离网" : "模拟终端入网" 
-            JoinOrLeaveButton.value = JoinOrLeavStatus === "模拟终端入网" ? "模拟终端离网" : "模拟终端入网" 
+            hashTable[terminalId.value] = JoinOrLeavStatus === "终端入网" ? "终端离网" : "终端入网" 
+            JoinOrLeaveButton.value = JoinOrLeavStatus === "终端入网" ? "终端离网" : "终端入网" 
         }
     }
 }
 
 function initTerminalStatus() {
     var sz = document.getElementById("u155_input")
+    var btn = document.getElementById("u247_input")
     if (sz !== null && sz !== undefined) {
         for (var i = 1; i <= sz.value; i ++) {
-            hashTable[i +""] = "模拟终端入网"
+            hashTable[i +""] = "终端入网"
         }
     }
+    btn.value = "终端入网"
 }
 
 function getSubLogCheckboxEvent() {
@@ -311,11 +357,17 @@ function initDropList() {
     }
 }
 
+//下拉框随选择的改变而改变
 function changeWithSelect() {
     var selectElement = document.getElementById('u250_input');
     var TerminalButton = document.getElementById('u247_input');
     selectElement.addEventListener('change', function() {
-        TerminalButton.value = hashTable[selectElement.value]
+        TerminalButton.value = hashTable[selectElement.value];
+        if (TerminalButton.value == "终端入网") {
+            disableTerminalOnlineButton();
+        } else {
+            enableTerminalOnlineButton();
+        }
     });
 }
 
@@ -327,5 +379,7 @@ subLogCheckboxEvent();
 pubLogCheckboxEvent();
 telnetCheckboxEvent();
 disableTerminalJoinOrLeaveButton();
-changeTerminalJoiToLeave();
+disableTerminalOnlineButton();
+changeTerminalJoinOrLeave();
+changeTerminalOnline();
 changeWithSelect();

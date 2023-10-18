@@ -18,7 +18,7 @@ func init() {
 	DataMsgType.UpMsg.TerminalPortBindRsp = "2208"
 	DataMsgType.UpMsg.TerminalAccessRsp = "2210"
 	DataMsgType.UpMsg.TerminalWholeNetRsp = "2204"
-	
+
 	DataMsgType.DownMsg.NeedAck = "1111"
 	DataMsgType.DownMsg.TerminalGetPort = "2205"
 	DataMsgType.DownMsg.TerminalInfoDown = "2101"
@@ -32,9 +32,9 @@ func init() {
 }
 
 type MessageType struct {
-	UpMsg      UpMsg
-	DownMsg    DownMsg
-	GeneralAck string
+	UpMsg               UpMsg
+	DownMsg             DownMsg
+	GeneralAck          string
 	ZigbeeGeneralFailed string
 }
 
@@ -87,7 +87,7 @@ func NewClient() *Client {
 	return &Client{
 		packets:  make(chan packet),
 		messages: make(chan Message),
-		Kill:     make(chan bool),
+		Kill:     make(chan bool, 2),
 		msgType:  make(chan string), //通道传递
 	}
 }
@@ -103,6 +103,7 @@ type TerminalInfo struct {
 	msgType    chan string //通道传递
 	devSN      string
 	DevEUI     string
+	IP         string
 }
 
 // JSONInfo JSONInfo
