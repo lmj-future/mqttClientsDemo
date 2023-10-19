@@ -80,9 +80,9 @@ func (c *Client) readFromSocket(buffersize int) {
 // 回了ack的话就更新缓存中的时间
 // 修改一下其中的序列号即可重新发送
 // 这里仅仅只将待传递的消息送出去 ---》 帧序列和待发送的类型
-func (c *Client) processPackets() {
+func (c *Client) processPackets(ter *TerminalInfo) {
 	for pack := range c.packets {
-		logger.Log.Warnln("/udpclient/processPackets/ Receive from", pack.returnAddress.IP.String(), ":", pack.returnAddress.Port, "Starting proc msg:", hex.EncodeToString(pack.bytes))
+		logger.Log.Warnln("/udpclient/processPackets/ Receive from", ter.IP, ":", pack.returnAddress.Port, "Starting proc msg:", hex.EncodeToString(pack.bytes))
 		jsoninfo, message, cacheKey := ParseUDPMsg(pack.bytes), "", ""
 		if jsoninfo.MessageHeader.MsgType == DataMsgType.GeneralAck { //下行报文ack，处理这些ack的思路就是在缓存中清理
 			cacheKey = jsoninfo.TunnelHeader.FrameSN + jsoninfo.MessagePayload.Data
@@ -137,6 +137,7 @@ func GenMode(nums int) []TerminalInfo {
 	}()
 	logger.Log.Infoln("/udpclient/GenMode: Generate new terminal information based on T320 device information....")
 	TnfGroup = make([]TerminalInfo, nums)
+	preventDuplica := make(map[string]bool)
 	for i := 0; i < nums; i++ {
 		sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
 		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
@@ -150,7 +151,6 @@ func GenMode(nums int) []TerminalInfo {
 		realMac := mac.(string)
 		devEUI := []byte{byte(i), 67, 234, 45, 67, 34, 122, 133}
 		ip := make([]byte, 2)
-		rand.Read(ip)
 		TnfGroup[i] = TerminalInfo{}
 		TnfGroup[i].FirstAddr = stringOfDev
 		TnfGroup[i].ThirdAddr = realMac
@@ -163,7 +163,14 @@ func GenMode(nums int) []TerminalInfo {
 		TnfGroup[i].Client.clientname = "TerminalInfo" + strconv.Itoa(i)
 		TnfGroup[i].devSN = devSN
 		TnfGroup[i].DevEUI = hex.EncodeToString(devEUI)
-		TnfGroup[i].IP = hex.EncodeToString(ip)
+		for { //防止重复
+			rand.Read(ip)
+			TnfGroup[i].IP = hex.EncodeToString(ip)
+			if _, ok := preventDuplica[TnfGroup[i].IP]; !ok {
+				break
+			}
+		}
+		(common.TransFrame).Counters[TnfGroup[i].IP] = 0
 		ClientForEveryMsg.Store(TnfGroup[i].Client.clientname, freecache.NewCache(5*1024*1024))
 		MsgAllClientPayload.Store(TnfGroup[i].Client.clientname, freecache.NewCache(5*1024*1024))
 	}
@@ -207,13 +214,13 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: first generate message!")
 				} else { //非首次内容则需要缓存提取，仅保活消息
 					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: again generate message!")
-					msgLoad, err := msgCache.(*freecache.Cache).Get([]byte(cacheKey))
+					_, err := msgCache.(*freecache.Cache).Get([]byte(cacheKey))
 					if err != nil {
 						logger.Log.Errorln("DevEUI:", Terminal.key, "/udpclient/sendMsg: The current message has expired and there are network fluctuations")
 						return
 					}
-					FrameSN = makeHex(FrameSN, 4)
-					prepareSend = CreateNewMsg(FrameSN, msgLoad)
+					FrameSN = common.TransFrame.IncrementAndStringGet(Terminal.IP)
+					prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
 					msgCache.(*freecache.Cache).Del([]byte(cacheKey))
 					fcache.(*freecache.Cache).Del([]byte(cacheKey))
 					time.Sleep(time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)) //间隔

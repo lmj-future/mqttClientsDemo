@@ -312,7 +312,7 @@ func TriTimeReport(interval int, terminal TerminalInfo, isTicker bool) {
 	if len(zclFrame) < 2 {
 		zclFrame = "0" + zclFrame
 	}
-	message = "0000" + DataMsgType.UpMsg.TerminalInfoUp + "REGULAR" + "08" + zclFrame + "0a" + "00001001"
+	message = common.TransFrame.IncrementAndStringGet(terminal.IP) + DataMsgType.UpMsg.TerminalInfoUp + "REGULAR" + "08" + zclFrame + "0a" + "00001001"
 	if isTicker {
 		ticker := time.NewTicker(time.Duration(interval)*time.Second)
 		for {

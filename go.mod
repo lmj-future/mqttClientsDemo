@@ -11,6 +11,7 @@ require (
 	github.com/pborman/uuid v1.2.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/zserge/lorca v0.1.10
+	
 )
 
 require (

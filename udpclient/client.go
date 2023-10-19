@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/lmj/mqtt-clients-demo/common"
 	"github.com/lmj/mqtt-clients-demo/config"
 	"github.com/lmj/mqtt-clients-demo/logger"
 )
@@ -26,8 +27,8 @@ func StartUDP(sig chan os.Signal, timestamp string) {
 	for _, v := range TnfGroup {
 		go sendMsg(v, v.Client)
 		go v.Client.readFromSocket(config.UDP_BUFFER_SIZE)
-		go v.Client.processPackets()
-		v.Client.msgType <- config.UDP_KEEPALIVE_MSG
+		go v.Client.processPackets(&v)
+		v.Client.msgType <- common.TransFrame.IncrementAndStringGet(v.IP) + config.UDP_KEEPALIVE_MSG
 	}
 	srv := &http.Server{
 		Addr: ":7777",
@@ -40,13 +41,13 @@ func StartUDP(sig chan os.Signal, timestamp string) {
 				if err != nil {
 					return
 				}
-				TnfGroup[ID-1].Client.msgType <- config.UDP_TERMINAL_NETACCESS
+				TnfGroup[ID-1].Client.msgType <- common.TransFrame.IncrementAndStringGet(TnfGroup[ID-1].IP) + config.UDP_TERMINAL_NETACCESS
 			} else if curStatus == "终端离网" {
 				ID, err := strconv.Atoi(TerminalID)
 				if err != nil {
 					return
 				}
-				TnfGroup[ID-1].Client.msgType <- config.UDP_TERMINAL_NETLEAVE
+				TnfGroup[ID-1].Client.msgType <- common.TransFrame.IncrementAndStringGet(TnfGroup[ID-1].IP) + config.UDP_TERMINAL_NETLEAVE
 			} else if curStatus == "设备上线"{
 				ID, err := strconv.Atoi(TerminalID)
 				if err != nil {
