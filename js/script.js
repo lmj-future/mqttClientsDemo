@@ -2,7 +2,6 @@
 document.title = "MQTT CLIENTS DEMO v1.0.2"
 const hashTable = {};
 
-
 var timestamp = Date.now().toString();
 var config = {
     PPS: 7,
@@ -371,6 +370,19 @@ function changeWithSelect() {
     });
 }
 
+function changeDisableOrText() {
+    var listener = document.getElementById("u252")
+    var textContent = document.getElementById("u255")
+    listener.addEventListener('mouseenter', function() {
+        textContent.style.display = 'block'
+    })
+    listener.addEventListener('mouseleave', function() {
+        textContent.style.display = 'none'
+    })
+}
+
+
+changeDisableOrText()
 enableStartButton();
 disableStopButton();
 startButtonEvent();

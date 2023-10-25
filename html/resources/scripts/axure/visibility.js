@@ -1099,5 +1099,5 @@
 
     var HIDDEN_CLASS = _visibility.HIDDEN_CLASS = 'ax_default_hidden';
     var UNPLACED_CLASS = _visibility.UNPLACED_CLASS = 'ax_default_unplaced';
-
+    
 });
