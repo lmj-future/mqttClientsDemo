@@ -1,6 +1,7 @@
 package udpclient
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -46,33 +47,38 @@ func checkUDPMsgIsLegal(msg []byte) bool {
 	return false
 }
 
-func (c *Client) readFromSocket(buffersize int) {
+func (c *Client) readFromSocket(ctx context.Context, buffersize int) {
 	for {
-		var b = make([]byte, buffersize)
-		n, addr, err := c.Connection.ReadFromUDP(b[:])
-		if err != nil {
+		select {
+		case <-ctx.Done():
 			return
-		}
-		if n > 0 {
-			pack := packet{b[0:n], addr}
-			//合法性检测
-			if !CheckMsg(pack.bytes) || !checkUDPMsgIsLegal(pack.bytes) {
-				continue
+		default:
+			var b = make([]byte, buffersize)
+			n, addr, err := c.Connection.ReadFromUDP(b[:])
+			if err != nil {
+				return
+			}
+			if n > 0 {
+				pack := packet{b[0:n], addr}
+				//合法性检测
+				if !CheckMsg(pack.bytes) || !checkUDPMsgIsLegal(pack.bytes) {
+					continue
+				}
+				select {
+				case c.packets <- pack:
+					continue
+				case <-c.Kill:
+					c.Connection.Close()
+					return
+				}
 			}
 			select {
-			case c.packets <- pack:
-				continue
 			case <-c.Kill:
 				c.Connection.Close()
 				return
+			default:
+				continue
 			}
-		}
-		select {
-		case <-c.Kill:
-			c.Connection.Close()
-			return
-		default:
-			continue
 		}
 	}
 }
@@ -80,47 +86,53 @@ func (c *Client) readFromSocket(buffersize int) {
 // 回了ack的话就更新缓存中的时间
 // 修改一下其中的序列号即可重新发送
 // 这里仅仅只将待传递的消息送出去 ---》 帧序列和待发送的类型
-func (c *Client) processPackets(ter *TerminalInfo) {
+func (c *Client) processPackets(ctx context.Context, ter *TerminalInfo) {
 	for pack := range c.packets {
-		logger.Log.Warnln("/udpclient/processPackets/ Receive from", ter.IP, ":", pack.returnAddress.Port, "Starting proc msg:", hex.EncodeToString(pack.bytes))
-		jsoninfo, message, cacheKey := ParseUDPMsg(pack.bytes), "", ""
-		if jsoninfo.MessageHeader.MsgType == DataMsgType.GeneralAck { //下行报文ack，处理这些ack的思路就是在缓存中清理
-			cacheKey = jsoninfo.TunnelHeader.FrameSN + jsoninfo.MessagePayload.Data
-			fcache, _ := ClientForEveryMsg.Load(c.clientname)
-			_, err1 := fcache.(*freecache.Cache).Get([]byte(cacheKey))
-			mcache, _ := MsgAllClientPayload.Load(c.clientname)
-			_, err2 := mcache.(*freecache.Cache).Get([]byte(cacheKey))
-			if err1 != nil || err2 != nil {
-				logger.Log.Errorln("DevEUI", cacheKey, "/udpclient/processPackets can't find Message, it has expired!")
-			} else {
-				if jsoninfo.MessagePayload.Data == DataMsgType.UpMsg.KeepAliveEvent {
-					message = cacheKey
-					c.msgType <- message
-				} else { //目前来说，有且仅有这一种，除了保活消息以外其他消息从缓存里删除掉
-					fcache.(*freecache.Cache).Del([]byte(cacheKey))
-					mcache.(*freecache.Cache).Del([]byte(cacheKey))
+		select {
+		case <-ctx.Done():
+			logger.Log.Warnln("/udpclient/processPackets/ exting")
+			return
+		default:
+			logger.Log.Warnln("/udpclient/processPackets/ Receive from", ter.IP, ":", pack.returnAddress.Port, "Starting proc msg:", hex.EncodeToString(pack.bytes))
+			jsoninfo, message, cacheKey := ParseUDPMsg(pack.bytes), "", ""
+			if jsoninfo.MessageHeader.MsgType == DataMsgType.GeneralAck { //下行报文ack，处理这些ack的思路就是在缓存中清理
+				cacheKey = jsoninfo.TunnelHeader.FrameSN + jsoninfo.MessagePayload.Data
+				fcache, _ := ClientForEveryMsg.Load(c.clientname)
+				_, err1 := fcache.(*freecache.Cache).Get([]byte(cacheKey))
+				mcache, _ := MsgAllClientPayload.Load(c.clientname)
+				_, err2 := mcache.(*freecache.Cache).Get([]byte(cacheKey))
+				if err1 != nil || err2 != nil {
+					logger.Log.Errorln("DevEUI", cacheKey, "/udpclient/processPackets can't find Message, it has expired!")
+				} else {
+					if jsoninfo.MessagePayload.Data == DataMsgType.UpMsg.KeepAliveEvent {
+						message = cacheKey
+						c.msgType <- message
+					} else { //目前来说，有且仅有这一种，除了保活消息以外其他消息从缓存里删除掉
+						fcache.(*freecache.Cache).Del([]byte(cacheKey))
+						mcache.(*freecache.Cache).Del([]byte(cacheKey))
+					}
 				}
+			} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalGetPort { //终端端口获取
+				message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalReportPort + DataMsgType.DownMsg.TerminalGetPort
+				c.msgType <- message
+			} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalInfoDown { //2101下行命令
+				message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalInfoUp + jsoninfo.MessagePayload.Data
+				c.msgType <- message
+			} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalSvcDiscoverReq { //2211 终端服务发现
+				message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalSvcDiscoverRsp + DataMsgType.DownMsg.TerminalSvcDiscoverReq
+				c.msgType <- message
+			} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalPortBindReq { //2207终端端口绑定
+				message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalPortBindRsp + DataMsgType.DownMsg.TerminalPortBindReq
+				c.msgType <- message
+			} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalAccessReq { //220f允许入网
+				message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalAccessRsp + DataMsgType.DownMsg.TerminalAccessReq
+				c.msgType <- message
+			} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalWholeNetReq { //2203拓扑网络请求,失败
+				message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.ZigbeeGeneralFailed + DataMsgType.DownMsg.TerminalWholeNetReq
+				c.msgType <- message
+			} else {
+				logger.Log.Warnln("/udpclient/processPackets receive unknown message! please check!")
 			}
-		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalGetPort { //终端端口获取
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalReportPort + DataMsgType.DownMsg.TerminalGetPort
-			c.msgType <- message
-		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalInfoDown { //2101下行命令
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalInfoUp + jsoninfo.MessagePayload.Data
-			c.msgType <- message
-		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalSvcDiscoverReq { //2211 终端服务发现
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalSvcDiscoverRsp + DataMsgType.DownMsg.TerminalSvcDiscoverReq
-			c.msgType <- message
-		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalPortBindReq { //2207终端端口绑定
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalPortBindRsp + DataMsgType.DownMsg.TerminalPortBindReq
-			c.msgType <- message
-		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalAccessReq { //220f允许入网
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.UpMsg.TerminalAccessRsp + DataMsgType.DownMsg.TerminalAccessReq
-			c.msgType <- message
-		} else if jsoninfo.MessageHeader.MsgType == DataMsgType.DownMsg.TerminalWholeNetReq { //2203拓扑网络请求,失败
-			message = jsoninfo.TunnelHeader.FrameSN + DataMsgType.ZigbeeGeneralFailed + DataMsgType.DownMsg.TerminalWholeNetReq
-			c.msgType <- message
-		} else {
-			logger.Log.Warnln("/udpclient/processPackets receive unknown message! please check!")
 		}
 	}
 }
@@ -148,7 +160,7 @@ func GenMode(nums int) []TerminalInfo {
 			stringOfDev += tempStr
 		}
 		mac, _ := common.DevSNwithMac.Load(devSN + "M")
-		realMac := mac.(string)
+		realMac := mac.(string)		
 		devEUI := []byte{byte(i), 67, 234, 45, 67, 34, 122, 133}
 		ip := make([]byte, 2)
 		TnfGroup[i] = TerminalInfo{}
@@ -183,7 +195,7 @@ func GenMode(nums int) []TerminalInfo {
  * @param {*Client} c
  * @return {*}
  */
-func sendMsg(Terminal TerminalInfo, c *Client) {
+func sendMsg(ctx context.Context, Terminal TerminalInfo, c *Client) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -193,145 +205,156 @@ func sendMsg(Terminal TerminalInfo, c *Client) {
 	var errString error
 	for msg := range c.msgType {
 		go func() {
-			prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), ""
-			if len(msg) > 8 {
-				msgLoad = strings.Repeat(msg[8:], 1)
-			}
-			if msgType == DataMsgType.UpMsg.KeepAliveEvent { //主动保活
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc keepalive message")
-				cacheKey := FrameSN + msgType
-				msgCache, hasClient1 := MsgAllClientPayload.Load(c.clientname)
-				_, err := msgCache.(*freecache.Cache).Get([]byte(cacheKey))
-				fcache, hasClient2 := ClientForEveryMsg.Load(c.clientname)
-				_, err1 := fcache.(*freecache.Cache).Get([]byte(cacheKey))
-				if !hasClient1 || !hasClient2 {
-					logger.Log.Errorln("DevEUI:", Terminal.key, "/udpclient/sendMsg: There is no corresponding client object in the cache, This Client is Closed!")
+			select {
+			case <-ctx.Done():
+				logger.Log.Errorln("/udpclient/sendMsg: exting!")
+				return
+			default:
+				prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), ""
+				if len(msg) > 8 {
+					msgLoad = strings.Repeat(msg[8:], 1)
+				}
+				if msgType == DataMsgType.UpMsg.KeepAliveEvent { //主动保活
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc keepalive message")
+					cacheKey := FrameSN + msgType
+					msgCache, hasClient1 := MsgAllClientPayload.Load(c.clientname)
+					_, err := msgCache.(*freecache.Cache).Get([]byte(cacheKey))
+					fcache, hasClient2 := ClientForEveryMsg.Load(c.clientname)
+					_, err1 := fcache.(*freecache.Cache).Get([]byte(cacheKey))
+					if !hasClient1 || !hasClient2 {
+						logger.Log.Errorln("DevEUI:", Terminal.key, "/udpclient/sendMsg: There is no corresponding client object in the cache, This Client is Closed!")
+						c.Kill <- true
+						return
+					}
+					if FrameSN == DataMsgType.UpMsg.StartEvent && err != nil && err1 != nil { //没缓存且首次发送
+						prepareSend, errString = encMsg(ctx, msgType, Terminal, FrameSN, "")
+						logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: first generate message!")
+					} else { //非首次内容则需要缓存提取，仅保活消息
+						logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: again generate message!")
+						_, err := msgCache.(*freecache.Cache).Get([]byte(cacheKey))
+						if err != nil {
+							logger.Log.Errorln("DevEUI:", Terminal.key, "/udpclient/sendMsg: The current message has expired and there are network fluctuations")
+							return
+						}
+						FrameSN = common.TransFrame.IncrementAndStringGet(Terminal.IP)
+						prepareSend, errString = encMsg(ctx, msgType, Terminal, FrameSN, "")
+						msgCache.(*freecache.Cache).Del([]byte(cacheKey))
+						fcache.(*freecache.Cache).Del([]byte(cacheKey))
+						time.Sleep(time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)) //间隔
+					}
+				} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent {
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalJoin message")
+					prepareSend, errString = encMsg(ctx, msgType, Terminal, FrameSN, "")
+				} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent {
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalLeave message")
+					prepareSend, errString = encMsg(ctx, msgType, Terminal, FrameSN, "")
+				} else if msgType == DataMsgType.UpMsg.TerminalReportPort { //收到终端上报数据时, 需要主动回复ack
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalReportPort")
+					go sendACK(ctx, DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalGetPort, FrameSN, c, Terminal)
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalReportPort message")
+					msgLoad = ""
+					prepareSend, errString = encMsg(ctx, DataMsgType.UpMsg.TerminalReportPort, Terminal, FrameSN, msgLoad)
+				} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //一联开关下发回复准备，这里内部再走一个分支，此时传入的payload就直接是要上送的payload信息
+					if msgLoad[0:7] == "REGULAR" {
+						logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send Regular report about TerminalInfoUp")
+						prepareSend, errString = encMsg(ctx, DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+					} else {
+						logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalInfoUp")
+						go sendACK(ctx, DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalInfoDown, FrameSN, c, Terminal)
+						logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalInfoUp message")
+						prepareSend, errString = encMsg(ctx, DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
+					}
+				} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp { //终端服务发现回复
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalSvcDiscoverRsp")
+					go sendACK(ctx, DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalSvcDiscoverReq, FrameSN, c, Terminal)
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalSvcDiscoverRsp message")
+					msgLoad = ""
+					prepareSend, errString = encMsg(ctx, DataMsgType.UpMsg.TerminalSvcDiscoverRsp, Terminal, FrameSN, msgLoad)
+				} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp { //终端端口绑定
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalPortBindRsp")
+					go sendACK(ctx, DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalPortBindReq, FrameSN, c, Terminal)
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalPortBindRsp message")
+					msgLoad = ""
+					prepareSend, errString = encMsg(ctx, DataMsgType.UpMsg.TerminalPortBindRsp, Terminal, FrameSN, msgLoad)
+				} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp { //终端入网许可
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalAccessRsp")
+					go sendACK(ctx, DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalAccessReq, FrameSN, c, Terminal)
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalAccessRsp message")
+					msgLoad = ""
+					prepareSend, errString = encMsg(ctx, DataMsgType.UpMsg.TerminalAccessRsp, Terminal, FrameSN, msgLoad)
+				} else if msgType == DataMsgType.UpMsg.TerminalWholeNetRsp { //拓扑网络请求
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalWholeNetRsp")
+					go sendACK(ctx, DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalWholeNetReq, FrameSN, c, Terminal)
+					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalWholeNetRsp message")
+					msgLoad = msgType
+					prepareSend, errString = encMsg(ctx, DataMsgType.ZigbeeGeneralFailed, Terminal, FrameSN, msgLoad)
+				}
+				if errString != nil {
+					logger.Log.Errorln(errString)
+					return
+				}
+				byteOfPrepareSend, _ := hex.DecodeString(prepareSend)
+				_, err := c.Connection.Write(byteOfPrepareSend)
+				if err != nil {
+					logger.Log.Errorln("/udpclient/sendMsg: The connection", c.clientname, "is disconnected")
 					c.Kill <- true
 					return
 				}
-				if FrameSN == DataMsgType.UpMsg.StartEvent && err != nil && err1 != nil { //没缓存且首次发送
-					prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
-					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: first generate message!")
-				} else { //非首次内容则需要缓存提取，仅保活消息
-					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: again generate message!")
-					_, err := msgCache.(*freecache.Cache).Get([]byte(cacheKey))
-					if err != nil {
-						logger.Log.Errorln("DevEUI:", Terminal.key, "/udpclient/sendMsg: The current message has expired and there are network fluctuations")
-						return
-					}
-					FrameSN = common.TransFrame.IncrementAndStringGet(Terminal.IP)
-					prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
-					msgCache.(*freecache.Cache).Del([]byte(cacheKey))
-					fcache.(*freecache.Cache).Del([]byte(cacheKey))
-					time.Sleep(time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)) //间隔
-				}
-			} else if msgType == DataMsgType.UpMsg.TerminalJoinEvent {
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalJoin message")
-				prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
-			} else if msgType == DataMsgType.UpMsg.TerminalLeaveEvent {
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: proc TerminalLeave message")
-				prepareSend, errString = encMsg(msgType, Terminal, FrameSN, "")
-			} else if msgType == DataMsgType.UpMsg.TerminalReportPort { //收到终端上报数据时, 需要主动回复ack
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalReportPort")
-				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalGetPort, FrameSN, c, Terminal)
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalReportPort message")
-				msgLoad = ""
-				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalReportPort, Terminal, FrameSN, msgLoad)
-			} else if msgType == DataMsgType.UpMsg.TerminalInfoUp { //一联开关下发回复准备，这里内部再走一个分支，此时传入的payload就直接是要上送的payload信息
-				if msgLoad[0:7] == "REGULAR" {
-					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send Regular report about TerminalInfoUp")
-					prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
-				} else {
-					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalInfoUp")
-					go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalInfoDown, FrameSN, c, Terminal)
-					logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalInfoUp message")
-					prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalInfoUp, Terminal, FrameSN, msgLoad)
-				}
-			} else if msgType == DataMsgType.UpMsg.TerminalSvcDiscoverRsp { //终端服务发现回复
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalSvcDiscoverRsp")
-				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalSvcDiscoverReq, FrameSN, c, Terminal)
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalSvcDiscoverRsp message")
-				msgLoad = ""
-				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalSvcDiscoverRsp, Terminal, FrameSN, msgLoad)
-			} else if msgType == DataMsgType.UpMsg.TerminalPortBindRsp { //终端端口绑定
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalPortBindRsp")
-				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalPortBindReq, FrameSN, c, Terminal)
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalPortBindRsp message")
-				msgLoad = ""
-				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalPortBindRsp, Terminal, FrameSN, msgLoad)
-			} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp { //终端入网许可
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalAccessRsp")
-				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalAccessReq, FrameSN, c, Terminal)
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalAccessRsp message")
-				msgLoad = ""
-				prepareSend, errString = encMsg(DataMsgType.UpMsg.TerminalAccessRsp, Terminal, FrameSN, msgLoad)
-			} else if msgType == DataMsgType.UpMsg.TerminalWholeNetRsp { //拓扑网络请求
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send ack message about TerminalWholeNetRsp")
-				go sendACK(DataMsgType.GeneralAck, DataMsgType.DownMsg.TerminalWholeNetReq, FrameSN, c, Terminal)
-				logger.Log.Infoln("DevEUI:", Terminal.key, "/udpclient/sendMsg: send TerminalWholeNetRsp message")
-				msgLoad = msgType
-				prepareSend, errString = encMsg(DataMsgType.ZigbeeGeneralFailed, Terminal, FrameSN, msgLoad)
+				logger.Log.Infoln("/udpclient/sendMsg: DevEUI:", Terminal.key, "/udpclient/sendMsg , the msg content is :", prepareSend)
+				updateTime, keyOfSend := time.Now().UnixNano(), FrameSN+msgType
+				fcache, _ := ClientForEveryMsg.Load(c.clientname)
+				fcache.(*freecache.Cache).Set([]byte(keyOfSend), []byte(strconv.FormatInt(updateTime, 10)), config.UDP_ALIVE_CHECK_TIME*5)
+				Msgfcache, _ := MsgAllClientPayload.Load(c.clientname)
+				Msgfcache.(*freecache.Cache).Set([]byte(keyOfSend), byteOfPrepareSend, config.UDP_ALIVE_CHECK_TIME*5)
+				go procKeepAliveMsgFreeCache(ctx, keyOfSend, config.UDP_ALIVE_CHECK_TIME, c.clientname)
+				go reSendMsg(ctx, Terminal, c, 1, keyOfSend) //所有消息都触发重发机制，除了额外封装的ack信息
 			}
-			if errString != nil {
-				logger.Log.Errorln(errString)
-				return
-			}
-			byteOfPrepareSend, _ := hex.DecodeString(prepareSend)
-			_, err := c.Connection.Write(byteOfPrepareSend)
-			if err != nil {
-				logger.Log.Errorln("/udpclient/sendMsg: The connection", c.clientname, "is disconnected")
-				c.Kill <- true
-				return
-			}
-			logger.Log.Infoln("/udpclient/sendMsg: DevEUI:", Terminal.key, "/udpclient/sendMsg , the msg content is :", prepareSend)
-			updateTime, keyOfSend := time.Now().UnixNano(), FrameSN+msgType
-			fcache, _ := ClientForEveryMsg.Load(c.clientname)
-			fcache.(*freecache.Cache).Set([]byte(keyOfSend), []byte(strconv.FormatInt(updateTime, 10)), config.UDP_ALIVE_CHECK_TIME*5)
-			Msgfcache, _ := MsgAllClientPayload.Load(c.clientname)
-			Msgfcache.(*freecache.Cache).Set([]byte(keyOfSend), byteOfPrepareSend, config.UDP_ALIVE_CHECK_TIME*5)
-			go procKeepAliveMsgFreeCache(keyOfSend, config.UDP_ALIVE_CHECK_TIME, c.clientname)
-			go reSendMsg(Terminal, c, 1, keyOfSend) //所有消息都触发重发机制，除了额外封装的ack信息
 		}()
 	}
 }
 
 // 保活消息重发
-func reSendMsg(Terminal TerminalInfo, c *Client, resendTime int, key string) {
+func reSendMsg(ctx context.Context, Terminal TerminalInfo, c *Client, resendTime int, key string) {
 	if resendTime == 4 {
 		return
 	}
 	timer := time.NewTimer((time.Second * time.Duration(config.UDP_ALIVE_CHECK_TIME)))
 	defer timer.Stop()
-	<-timer.C
-	msgCache, hasClient := MsgAllClientPayload.Load(c.clientname)
-	if !hasClient {
-		logger.Log.Warnln("/udpclient/reSendMsg: The connection", c.clientname, "is disconnected")
+	select {
+	case <-ctx.Done():
+		logger.Log.Warnln("/udpclient/reSendMsg exting")
 		return
-	}
-	data, err := msgCache.(*freecache.Cache).Get([]byte(key))
-	if err == nil {
-		preSend := hex.EncodeToString(data)
-		logger.Log.Warnln("/udpclient/reSendMsg:", preSend, "Generate ReSend Message", resendTime, "Times")
-		byteOfPresend, errIn := hex.DecodeString(preSend)
-		if errIn != nil {
-			logger.Log.Errorln("/udpclient/reSendMsg: ReDecode is Fail, Illegal Message!")
+	case <-timer.C:
+		msgCache, hasClient := MsgAllClientPayload.Load(c.clientname)
+		if !hasClient {
+			logger.Log.Warnln("/udpclient/reSendMsg: The connection", c.clientname, "is disconnected")
 			return
 		}
-		_, errIn = c.Connection.Write(byteOfPresend)
-		if errIn != nil {
-			logger.Log.Errorln("/udpclient/reSendMsg: The connection", c.clientname, "is disconnected")
-			c.Kill <- true
-			return
+		data, err := msgCache.(*freecache.Cache).Get([]byte(key))
+		if err == nil {
+			preSend := hex.EncodeToString(data)
+			logger.Log.Warnln("/udpclient/reSendMsg:", preSend, "Generate ReSend Message", resendTime, "Times")
+			byteOfPresend, errIn := hex.DecodeString(preSend)
+			if errIn != nil {
+				logger.Log.Errorln("/udpclient/reSendMsg: ReDecode is Fail, Illegal Message!")
+				return
+			}
+			_, errIn = c.Connection.Write(byteOfPresend)
+			if errIn != nil {
+				logger.Log.Errorln("/udpclient/reSendMsg: The connection", c.clientname, "is disconnected")
+				c.Kill <- true
+				return
+			}
+			reSendMsg(ctx, Terminal, c, resendTime+1, key)
 		}
-		reSendMsg(Terminal, c, resendTime+1, key)
 	}
 }
 
 /*
 仅用于设备侧的ack消息回复
 */
-func sendACK(msgType, load, FrameSN string, c *Client, ter TerminalInfo) {
-	prepareMsg, err := encMsg(msgType, ter, FrameSN, load)
+func sendACK(ctx context.Context, msgType, load, FrameSN string, c *Client, ter TerminalInfo) {
+	prepareMsg, err := encMsg(ctx, msgType, ter, FrameSN, load)
 	if err != nil {
 		logger.Log.Errorln("udpclient/sendAck/ can't gengerate msg!")
 		return

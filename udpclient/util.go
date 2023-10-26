@@ -1,6 +1,7 @@
 package udpclient
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/rand"
@@ -27,7 +28,7 @@ func errorCheck(err error, where string, kill bool) {
 // 当前消息,key表示三级地址的串联，中间需要配置
 // payload的使用，实在构造回复消息的时作为消息载体存在
 // 终端网络地址也要设备进行标识
-func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (string, error) {
+func encMsg(ctx context.Context, msgType string, dev TerminalInfo, FrameSN string, payLoad string) (string, error) {
 	var (
 		msg     strings.Builder
 		randMsg string
@@ -40,7 +41,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 	msg.WriteString(dev.FirstAddr)
 	msg.WriteString("34")
 	msg.WriteString(dev.SecondAddr)
-	randMsg = GetRand(4, false)                                                          
+	randMsg = GetRand(4, false)
 	if msgType == DataMsgType.UpMsg.KeepAliveEvent || msgType == DataMsgType.GeneralAck { //基本保活
 		msg.WriteString("06")
 		mMac, _ := common.DevSNwithMac.Load(dev.devSN + "M")
@@ -71,7 +72,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 		} else {
 			profileId, clusterId, zclData = payLoad[0:4], payLoad[4:8], payLoad[10:]
 		}
-		randMsg, err = CreatePreUpData(profileId, clusterId, dev.IP, zclData, dev)
+		randMsg, err = CreatePreUpData(ctx, profileId, clusterId, dev.IP, zclData, dev)
 		if err != nil {
 			return "", err
 		}
@@ -86,7 +87,7 @@ func encMsg(msgType string, dev TerminalInfo, FrameSN string, payLoad string) (s
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
 		msg.WriteString(gmac.(string))
 		//Profile, 网络地址，状态
-		randMsg = "0104" + dev.IP+ "00"
+		randMsg = "0104" + dev.IP + "00"
 	} else if msgType == DataMsgType.UpMsg.TerminalAccessRsp {
 		msg.WriteString("08")
 		gmac, _ := common.DevSNwithMac.Load(dev.devSN + "G")
@@ -166,24 +167,29 @@ func GetRand(length int, isDigit bool) string {
 }
 
 // 检测保活信息的处理
-func procKeepAliveMsgFreeCache(key string, t int, clientName string) {
+func procKeepAliveMsgFreeCache(ctx context.Context, key string, t int, clientName string) {
 	logger.Log.Infoln("Start detecting message survival!")
 	var timerID = time.NewTimer(time.Duration(t*3+3) * time.Second)
 	MsgCheckTimeID.Store(key, timerID)
-	<-timerID.C
-	timerID.Stop()
-	if value, ok := MsgCheckTimeID.Load(key); ok {
-		if timerID == value.(*time.Timer) {
-			MsgCheckTimeID.Delete(key)
-			updateTime, err := KeepAliveTimerFreeCacheGet(key, clientName)
-			if err == nil {
-				if time.Now().UnixNano()-updateTime > int64(time.Duration(3*t)*time.Second) {
-					logger.Log.Warnln("device :", key, "has not revc keep alive msg for",
-						(time.Now().UnixNano()-updateTime)/int64(time.Second), "seconds. This Client exit!")
-					fcache, _ := ClientForEveryMsg.Load(clientName)
-					fcache.(*freecache.Cache).Del([]byte(key))
-					fcache, _ = MsgAllClientPayload.Load(clientName)
-					fcache.(*freecache.Cache).Del([]byte(key))
+	select {
+	case <-ctx.Done():
+		logger.Log.Infoln("util/procKeepAliveMsgFreeCacheStart exting!")
+		return
+	case <-timerID.C:
+		timerID.Stop()
+		if value, ok := MsgCheckTimeID.Load(key); ok {
+			if timerID == value.(*time.Timer) {
+				MsgCheckTimeID.Delete(key)
+				updateTime, err := KeepAliveTimerFreeCacheGet(key, clientName)
+				if err == nil {
+					if time.Now().UnixNano()-updateTime > int64(time.Duration(3*t)*time.Second) {
+						logger.Log.Warnln("device :", key, "has not revc keep alive msg for",
+							(time.Now().UnixNano()-updateTime)/int64(time.Second), "seconds. This Client exit!")
+						fcache, _ := ClientForEveryMsg.Load(clientName)
+						fcache.(*freecache.Cache).Del([]byte(key))
+						fcache, _ = MsgAllClientPayload.Load(clientName)
+						fcache.(*freecache.Cache).Del([]byte(key))
+					}
 				}
 			}
 		}
@@ -228,7 +234,7 @@ func CreateNewMsg(FrameSN string, Msg []byte) string {
 }
 
 // 回复PayLoad
-func CreatePreUpData(p, c, addr, zclData string, Ter TerminalInfo) (string, error) {
+func CreatePreUpData(ctx context.Context, p, c, addr, zclData string, Ter TerminalInfo) (string, error) {
 	var (
 		tempString   strings.Builder
 		tempInString strings.Builder
@@ -268,7 +274,7 @@ func CreatePreUpData(p, c, addr, zclData string, Ter TerminalInfo) (string, erro
 		zclRspHeader.FrameCtrl = "08"
 		zclRspHeader.CommandIdent = "07"
 		interval, _ := strconv.ParseInt(zclData[16:18]+zclData[14:16], 16, 32)
-		go TriTimeReport(int(interval), Ter, true)
+		go TriTimeReport(ctx, int(interval), Ter, true)
 		postZclData = "00" //确认
 	case "0a":
 		zclRspHeader.FrameCtrl = zclHeader.FrameCtrl
@@ -304,8 +310,8 @@ func procReadBasic(zclData, cluster string, preFix int) string {
 	return result.String()
 }
 
-// 该接口适配主动上线功能
-func TriTimeReport(interval int, terminal TerminalInfo, isTicker bool) {
+// 该接口适配主动上线功能,处理
+func TriTimeReport(ctx context.Context, interval int, terminal TerminalInfo, isTicker bool) {
 	ZclRegularReport++
 	zclFrame, message := "", ""
 	zclFrame = strconv.FormatInt(int64(ZclRegularReport), 16)
@@ -314,20 +320,17 @@ func TriTimeReport(interval int, terminal TerminalInfo, isTicker bool) {
 	}
 	message = common.TransFrame.IncrementAndStringGet(terminal.IP) + DataMsgType.UpMsg.TerminalInfoUp + "REGULAR" + "08" + zclFrame + "0a" + "00001001"
 	if isTicker {
-		ticker := time.NewTicker(time.Duration(interval)*time.Second)
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		//这个for循环可以去掉的吗
 		for {
 			select {
 			case <-ticker.C:
 				//理论上应当采用保活帧序列号，但此处使用新起始号，zcl封装信息固定
 				logger.Log.Infoln("/udpclient/CreatePreUpData start regular send message!")
 				terminal.Client.msgType <- message
-			case value := <-RegularCh: //退出时及时终止
-				if value {
-					ticker.Stop()
-					return
-				}
-			default:
-				continue
+			case <-ctx.Done(): //退出时及时终止
+				logger.Log.Infoln("/udpclient/CreatePreUpData exiting!")
+				return
 			}
 		}
 	} else {

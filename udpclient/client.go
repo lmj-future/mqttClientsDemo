@@ -1,6 +1,7 @@
 package udpclient
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -13,21 +14,17 @@ import (
 
 var (
 	TnfGroup         []TerminalInfo
-	ServerCh         chan bool //udp服务关闭
-	RegularCh        chan bool //定时上报
 	ReStart          int       = -1
 	ZclRegularReport int       = -1 //定时上报的帧序列号
 )
 
 // 该地方留给触发按键
-func StartUDP(sig chan os.Signal, timestamp string) {
-	ServerCh = make(chan bool, 2)
-	RegularCh = make(chan bool, 2)
+func StartUDP(ctx context.Context, sig chan os.Signal, timestamp string) {
 	TnfGroup = GenMode(config.DEVICE_TOTAL_COUNT)
 	for _, v := range TnfGroup {
-		go sendMsg(v, v.Client)
-		go v.Client.readFromSocket(config.UDP_BUFFER_SIZE)
-		go v.Client.processPackets(&v)
+		go sendMsg(ctx, v, v.Client)
+		go v.Client.readFromSocket(ctx, config.UDP_BUFFER_SIZE)
+		go v.Client.processPackets(ctx, &v)
 		v.Client.msgType <- common.TransFrame.IncrementAndStringGet(v.IP) + config.UDP_KEEPALIVE_MSG
 	}
 	srv := &http.Server{
@@ -48,12 +45,12 @@ func StartUDP(sig chan os.Signal, timestamp string) {
 					return
 				}
 				TnfGroup[ID-1].Client.msgType <- common.TransFrame.IncrementAndStringGet(TnfGroup[ID-1].IP) + config.UDP_TERMINAL_NETLEAVE
-			} else if curStatus == "设备上线"{
+			} else if curStatus == "设备上线" {
 				ID, err := strconv.Atoi(TerminalID)
 				if err != nil {
 					return
 				}
-				go TriTimeReport(600, TnfGroup[ID-1], false)
+				go TriTimeReport(ctx, 600, TnfGroup[ID-1], false)
 			}
 		})
 
@@ -63,11 +60,13 @@ func StartUDP(sig chan os.Signal, timestamp string) {
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Log.Errorf("ListenAndServe: %s", err)
 			}
-		}()
-		<-ServerCh
-		if err := srv.Close(); err != nil {
-			logger.Log.Errorf("Server Close failed: %s", err)
+		}()  //侦听等待处理
+		select {  
+		case <-ctx.Done():
+			if err := srv.Close(); err != nil {
+				logger.Log.Errorf("Server Close failed: %s", err)
+			}
+			log.Println("Server Exited Properly")
 		}
-		log.Println("Server Exited Properly")
 	}()
 }

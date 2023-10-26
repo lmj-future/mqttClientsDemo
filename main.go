@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -25,6 +26,8 @@ import (
 )
 
 var clientState string = ""
+var ctx context.Context
+var cancelUdp context.CancelFunc
 
 func init() {
 	config.Init()
@@ -374,24 +377,9 @@ func checkAndDisplay(timestamp string) {
 }
 
 func stop(sig chan os.Signal) {
-	//去除时间戳，防止重复清理
-	common.UniqueTime.Mu.Lock()
-	defer common.UniqueTime.Mu.Unlock()
-	select {
-	case udpclient.ServerCh <- true:
-		logger.Log.Infoln("/Closing Http Server")
-	default:
-		break
-	}
-	select {
-	case udpclient.RegularCh <- true:
-		logger.Log.Infoln("/Closing regular send msg")
-	default:
-		break
-	}
-	time.Sleep(time.Second * 3)
+	cancelUdp()
+	time.Sleep(time.Second * 2)
 	wg := &sync.WaitGroup{}
-	logger.Log.Infoln("Exit/ start close udp connection!")
 	wg.Add(len(udpclient.TnfGroup))
 	for _, term := range udpclient.TnfGroup {
 		udpclient.ClientForEveryMsg.Range(func(key, value interface{}) bool {
@@ -409,7 +397,7 @@ func stop(sig chan os.Signal) {
 	time.Sleep(2 * time.Second)
 	if !mqttclient.ClientStopMap.IsEmpty() {
 		mqttclient.ClientStopMap.Clear()
-		<-time.After(3 * time.Second)
+		<-time.After(2 * time.Second)
 		logger.Log.Infoln("客户端触发停止，正在销毁资源！！！请等待...")
 		clientMap := cmap.New()
 		for i := range mqttclient.ClientMap.IterBuffered() {
@@ -447,17 +435,8 @@ func stop(sig chan os.Signal) {
 
 func exit() {
 	logger.Log.Warnln("========================Exit=======================")
-	select {
-	case udpclient.ServerCh <- true:
-	default:
-		break
-	}
-	select {
-	case udpclient.RegularCh <- true:
-	default:
-		break
-	}
-	time.Sleep(time.Second * 3)
+	cancelUdp()
+	time.Sleep(time.Second * 2)
 	wg := &sync.WaitGroup{}
 	wg.Add(len(udpclient.TnfGroup))
 	for _, term := range udpclient.TnfGroup {
@@ -510,9 +489,9 @@ func exit() {
 
 func do(sig chan os.Signal, timestamp string) {
 	udpclient.ReStart++ //限制重新绑定api
+	ctx, cancelUdp = context.WithCancel(context.Background())
 	// 1、先进行MQTT连接
 	isNeedNext := mqttConnectFirst(sig, timestamp)
-
 	// 2、再进行MQTT消息订阅
 	if isNeedNext {
 		<-time.After(time.Second * 3)
@@ -529,7 +508,7 @@ func do(sig chan os.Signal, timestamp string) {
 			lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
 		}
 	}
-	go udpclient.StartUDP(sig, timestamp) //通道保活开启
+	go udpclient.StartUDP(ctx, sig, timestamp) //通道保活开启
 	// 4、启动定时器，对数据进行定时上送
 	if isNeedNext {
 		<-time.After(time.Second * 3)
