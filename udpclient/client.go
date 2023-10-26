@@ -2,7 +2,6 @@ package udpclient
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,8 +13,8 @@ import (
 
 var (
 	TnfGroup         []TerminalInfo
-	ReStart          int       = -1
-	ZclRegularReport int       = -1 //定时上报的帧序列号
+	ReStart          int = -1
+	ZclRegularReport int = -1 //定时上报的帧序列号
 )
 
 // 该地方留给触发按键
@@ -60,13 +59,10 @@ func StartUDP(ctx context.Context, sig chan os.Signal, timestamp string) {
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				logger.Log.Errorf("ListenAndServe: %s", err)
 			}
-		}()  //侦听等待处理
-		select {  
-		case <-ctx.Done():
-			if err := srv.Close(); err != nil {
-				logger.Log.Errorf("Server Close failed: %s", err)
-			}
-			log.Println("Server Exited Properly")
+		}() //侦听等待处理
+		<-ctx.Done()
+		if err := srv.Close(); err != nil {
+			logger.Log.Errorf("Server Close failed: %s", err)
 		}
 	}()
 }

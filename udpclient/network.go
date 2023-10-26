@@ -90,7 +90,6 @@ func (c *Client) processPackets(ctx context.Context, ter *TerminalInfo) {
 	for pack := range c.packets {
 		select {
 		case <-ctx.Done():
-			logger.Log.Warnln("/udpclient/processPackets/ exting")
 			return
 		default:
 			logger.Log.Warnln("/udpclient/processPackets/ Receive from", ter.IP, ":", pack.returnAddress.Port, "Starting proc msg:", hex.EncodeToString(pack.bytes))
@@ -202,12 +201,11 @@ func sendMsg(ctx context.Context, Terminal TerminalInfo, c *Client) {
 			logger.Log.Errorln("/udpclient/sendMsg: send message procedure exist problem, errors' are", err)
 		}
 	}()
-	var errString error
 	for msg := range c.msgType {
 		go func() {
+			var errString error
 			select {
 			case <-ctx.Done():
-				logger.Log.Errorln("/udpclient/sendMsg: exting!")
 				return
 			default:
 				prepareSend, FrameSN, msgType, msgLoad := "", strings.Repeat(msg[0:4], 1), strings.Repeat(msg[4:8], 1), ""
@@ -290,7 +288,7 @@ func sendMsg(ctx context.Context, Terminal TerminalInfo, c *Client) {
 					prepareSend, errString = encMsg(ctx, DataMsgType.ZigbeeGeneralFailed, Terminal, FrameSN, msgLoad)
 				}
 				if errString != nil {
-					logger.Log.Errorln(errString)
+					logger.Log.Errorln(errString.Error())
 					return
 				}
 				byteOfPrepareSend, _ := hex.DecodeString(prepareSend)
@@ -306,8 +304,8 @@ func sendMsg(ctx context.Context, Terminal TerminalInfo, c *Client) {
 				fcache.(*freecache.Cache).Set([]byte(keyOfSend), []byte(strconv.FormatInt(updateTime, 10)), config.UDP_ALIVE_CHECK_TIME*5)
 				Msgfcache, _ := MsgAllClientPayload.Load(c.clientname)
 				Msgfcache.(*freecache.Cache).Set([]byte(keyOfSend), byteOfPrepareSend, config.UDP_ALIVE_CHECK_TIME*5)
-				go procKeepAliveMsgFreeCache(ctx, keyOfSend, config.UDP_ALIVE_CHECK_TIME, c.clientname)
 				go reSendMsg(ctx, Terminal, c, 1, keyOfSend) //所有消息都触发重发机制，除了额外封装的ack信息
+				procKeepAliveMsgFreeCache(ctx, keyOfSend, config.UDP_ALIVE_CHECK_TIME, c.clientname)
 			}
 		}()
 	}
@@ -322,7 +320,6 @@ func reSendMsg(ctx context.Context, Terminal TerminalInfo, c *Client, resendTime
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		logger.Log.Warnln("/udpclient/reSendMsg exting")
 		return
 	case <-timer.C:
 		msgCache, hasClient := MsgAllClientPayload.Load(c.clientname)

@@ -173,7 +173,6 @@ func procKeepAliveMsgFreeCache(ctx context.Context, key string, t int, clientNam
 	MsgCheckTimeID.Store(key, timerID)
 	select {
 	case <-ctx.Done():
-		logger.Log.Infoln("util/procKeepAliveMsgFreeCacheStart exting!")
 		return
 	case <-timerID.C:
 		timerID.Stop()
@@ -329,7 +328,6 @@ func TriTimeReport(ctx context.Context, interval int, terminal TerminalInfo, isT
 				logger.Log.Infoln("/udpclient/CreatePreUpData start regular send message!")
 				terminal.Client.msgType <- message
 			case <-ctx.Done(): //退出时及时终止
-				logger.Log.Infoln("/udpclient/CreatePreUpData exiting!")
 				return
 			}
 		}
