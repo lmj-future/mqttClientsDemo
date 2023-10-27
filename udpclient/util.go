@@ -265,25 +265,40 @@ func CreatePreUpData(ctx context.Context, p, c, addr, zclData string, Ter Termin
 		TransactionSec: zclHeader.TransactionSec,
 	}
 	postZclData := procReadBasic(zclData, c, 6)
-	switch zclHeader.CommandIdent {
-	case "00":
-		zclRspHeader.FrameCtrl = "18"
-		zclRspHeader.CommandIdent = "01"
-	case "06":
-		zclRspHeader.FrameCtrl = "08"
-		zclRspHeader.CommandIdent = "07"
-		interval, _ := strconv.ParseInt(zclData[16:18]+zclData[14:16], 16, 32)
-		go TriTimeReport(ctx, int(interval), Ter, true)
-		postZclData = "00" //确认
-	case "0a":
-		zclRspHeader.FrameCtrl = zclHeader.FrameCtrl
-		zclRspHeader.CommandIdent = zclHeader.CommandIdent
-		postZclData = zclData[6:]
-	default:
-		// case "0b": 存在问题
-		// 	zclRspHeader.FrameCtrl = "08"
-		// 	zclRspHeader.CommandIdent = "07"
-		return "", fmt.Errorf("/udpclient/encMsg can't recogenize the zcl message")
+	if zclHeader.FrameCtrl == "00" {
+		switch zclHeader.CommandIdent {
+		case "00":
+			zclRspHeader.FrameCtrl = "18"
+			zclRspHeader.CommandIdent = "01"
+		case "06":
+			zclRspHeader.FrameCtrl = "08"
+			zclRspHeader.CommandIdent = "07"
+			interval, _ := strconv.ParseInt(zclData[16:18]+zclData[14:16], 16, 32)
+			go TriTimeReport(ctx, int(interval), Ter, true)
+			postZclData = "00" //确认
+		case "0a":
+			zclRspHeader.FrameCtrl = zclHeader.FrameCtrl
+			zclRspHeader.CommandIdent = zclHeader.CommandIdent
+			postZclData = zclData[6:]
+		default:
+			// case "0b": 存在问题
+			// 	zclRspHeader.FrameCtrl = "08"
+			// 	zclRspHeader.CommandIdent = "07"
+			return "", fmt.Errorf("/udpclient/encMsg can't recogenize the zcl message")
+		}
+	} else {
+		switch zclHeader.CommandIdent {
+		case "00":
+			zclRspHeader.FrameCtrl = "08"
+			zclRspHeader.CommandIdent = "0b"
+			postZclData = "0000"
+		case "01":
+			zclRspHeader.FrameCtrl = "08"
+			zclRspHeader.CommandIdent = "0b"
+			postZclData = "0100"
+		default:
+			return "", fmt.Errorf("/udpclient/encMsg can't recogenize the zcl message")
+		}
 	}
 	tempInString.WriteString(zclRspHeader.FrameCtrl)
 	tempInString.WriteString(zclRspHeader.TransactionSec)
