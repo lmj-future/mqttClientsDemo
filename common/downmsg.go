@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -16,6 +18,7 @@ import (
 )
 
 var DeviceTimeStampMap cmap.ConcurrentMap
+var MqttMsgCounter int32 = 1
 
 func InitTimeStampMap() {
 	DeviceTimeStampMap = cmap.New()
@@ -191,79 +194,99 @@ func ProcUpgradeMsg(c mqtt.Client, m mqtt.Message) {
 	upgradeMsg := ParseUpgradeMsg(m.Payload())
 	if upgradeMsg.Method == "/ota/device/upgrade" {
 		devSN := replyTopic[len(replyTopic)-config.DEVICE_SN_LEN:]
-		go downLoadSWare(upgradeMsg.Data.Url, upgradeMsg.Data.Version, devSN)
-		progressMsg := ProgressMsg{
-			Id: 1,
-			Params: Param{
-				Step: "1",
-				Desc: "upgrading",
-			},
-		}
-		payload, _ := json.Marshal(progressMsg)
-		if c.IsConnectionOpen() {
-			if config.LOG_MQTT_PUBLISH_ENABLE {
-				logger.Log.Infof("发布topic为 %s 的消息: %s", replyTopic, string(payload))
+		MqttMsgCounter = 1
+		downLoadSWare(upgradeMsg.Data.Url, upgradeMsg.Data.Version, devSN, func(length, downLen int64, times int) {
+			for {
+				if MqttMsgCounter == int32(times) {
+					curProgress := int(float64(downLen) / float64(length) * 100)
+					logger.Log.Infof("/common/downmsg/ current progress is =%d%%", curProgress)
+					progressMsg := ProgressMsg{
+						Id: times,
+						Params: Param{
+							Step: strconv.FormatInt(int64(curProgress), 10),
+							Desc: "upgrading",
+						},
+					}
+					payload, _ := json.Marshal(progressMsg)
+					if c.IsConnectionOpen() {
+						if config.LOG_MQTT_PUBLISH_ENABLE {
+							logger.Log.Infof("发布topic为 %s 的消息: %s", replyTopic, string(payload))
+						}
+						c.Publish(replyTopic, 0, false, string(payload))
+					}
+					if curProgress == 100 {
+						payload = EncUpMsg(BASIC_INFO_UP, devSN, DownMsg{Version: upgradeMsg.Data.Version, DevModel: config.PRODUCT_NAME})
+						if c.IsConnectionOpen() {
+							if config.LOG_MQTT_PUBLISH_ENABLE {
+								logger.Log.Infof("发布topic为 %s 的消息: %s", replyTopic, string(payload))
+							}
+							topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, devSN)
+							c.Publish(topic, 0, false, string(payload))
+						}
+					}
+					atomic.AddInt32(&MqttMsgCounter, 1)
+					break
+				}
 			}
-			c.Publish(replyTopic, 0, false, string(payload))
-		}
-		timer := time.NewTimer(time.Second * 3)
-		<-timer.C
-		progressMsg.Id = 2
-		progressMsg.Params.Step = "50"
-		payload, _ = json.Marshal(progressMsg)
-		if c.IsConnectionOpen() {
-			if config.LOG_MQTT_PUBLISH_ENABLE {
-				logger.Log.Infof("发布topic为 %s 的消息: %s", replyTopic, string(payload))
-			}
-			c.Publish(replyTopic, 0, false, string(payload))
-		}
-		timer.Reset(time.Second * 3)
-		<-timer.C
-		progressMsg.Id = 3
-		progressMsg.Params.Step = "100"
-		payload, _ = json.Marshal(progressMsg)
-		if c.IsConnectionOpen() {
-			if config.LOG_MQTT_PUBLISH_ENABLE {
-				logger.Log.Infof("发布topic为 %s 的消息: %s", replyTopic, string(payload))
-			}
-			c.Publish(replyTopic, 0, false, string(payload))
-		}
-		timer.Reset(time.Second * 3)
-		<-timer.C
-		payload = EncUpMsg(BASIC_INFO_UP, devSN, DownMsg{Version: upgradeMsg.Data.Version, DevModel: config.PRODUCT_NAME})
-		if c.IsConnectionOpen() {
-			if config.LOG_MQTT_PUBLISH_ENABLE {
-				logger.Log.Infof("发布topic为 %s 的消息: %s", replyTopic, string(payload))
-			}
-			topic := fmt.Sprintf(config.PUB_TOPIC[0], config.PRODUCT_KEY, devSN)
-			c.Publish(topic, 0, false, string(payload))
-		}
+		})
 	}
 }
 
 // 下载
-func downLoadSWare(url, version, devSN string) {
-	logger.Log.Infoln("/common/downmsg Start downing T320M new version")
+func downLoadSWare(url, version, devSN string, callBack func(length, downLen int64, times int)) {
+	var (
+		fsize   int64
+		buf     = make([]byte, 1024*1024)
+		written int64
+		msgId   int
+	)
 	fileName := devSN + version + DOWNLOADFILE_POSTFIX
-	response, err := http.Get("http://" + url)
+	resp, err := http.Get("http://" + url)
 	if err != nil {
-		logger.Log.Errorln("/common/downmsg Get URL Failed", err)
+		logger.Log.Errorln("/common/downmsg get url Failed", err)
 		return
 	}
-	defer response.Body.Close()
+	defer resp.Body.Close()
+	fsize, err = strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 32)
+	if err != nil {
+		logger.Log.Errorln("/common/downmsg", err)
+		return
+	}
 	err = os.MkdirAll(DOWNLOADFILE_PATH, os.ModePerm)
 	if err != nil {
-		logger.Log.Errorln("mkdir Failed%s\n", err)
+		logger.Log.Errorln("/common/downmsg mkdir Failed", err)
 		return
 	}
-	file, err := os.Create(DOWNLOADFILE_PATH + fileName)
+	realFile, err := os.Create(DOWNLOADFILE_PATH + fileName)
 	if err != nil {
-		logger.Log.Errorln("/common/downmsg Create Storage File Failed", err)
+		logger.Log.Errorln("/common/downmsg can't craete file", err)
+		return
 	}
-	defer file.Close()
-	_, err = io.Copy(file, response.Body)
-	if err != nil {
-		logger.Log.Errorln("/common/downmsg Copy Msg Failed", err)
+	defer realFile.Close()
+	for {
+		nr, er := resp.Body.Read(buf)
+		if nr > 0 {
+			nw, ew := realFile.Write(buf[0:nr])
+			if nw > 0 {
+				written += int64(nw)
+			}
+			if ew != nil {
+				logger.Log.Errorln("/common/downmsg", ew)
+				break
+			}
+			if nr != nw {
+				logger.Log.Errorln("/common/downmsg", io.ErrShortWrite)
+				break
+			}
+		}
+		if er != nil && er != io.EOF {
+			logger.Log.Errorln("/common/downmsg partial error in reading copy", err)
+			return
+		}
+		msgId++
+		go callBack(fsize, written, msgId)
+		if er == io.EOF {
+			break
+		}
 	}
-	logger.Log.Infoln("/common/downmsg downing T320M new version Finished!")
 }

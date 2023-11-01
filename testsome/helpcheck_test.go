@@ -31,3 +31,6 @@ func getRand(length int, isDigit bool) string {
 func TestFunc(t *testing.T) {
 	fmt.Println(getRand(20, false))
 }
+
+func TestDown(t *testing.T) {
+}
