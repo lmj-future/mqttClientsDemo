@@ -3,6 +3,9 @@ package common
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -188,6 +191,7 @@ func ProcUpgradeMsg(c mqtt.Client, m mqtt.Message) {
 	upgradeMsg := ParseUpgradeMsg(m.Payload())
 	if upgradeMsg.Method == "/ota/device/upgrade" {
 		devSN := replyTopic[len(replyTopic)-config.DEVICE_SN_LEN:]
+		go downLoadSWare(upgradeMsg.Data.Url, upgradeMsg.Data.Version, devSN)
 		progressMsg := ProgressMsg{
 			Id: 1,
 			Params: Param{
@@ -235,4 +239,31 @@ func ProcUpgradeMsg(c mqtt.Client, m mqtt.Message) {
 			c.Publish(topic, 0, false, string(payload))
 		}
 	}
+}
+
+// 下载
+func downLoadSWare(url, version, devSN string) {
+	logger.Log.Infoln("/common/downmsg Start downing T320M new version")
+	fileName := devSN + version + DOWNLOADFILE_POSTFIX
+	response, err := http.Get("http://" + url)
+	if err != nil {
+		logger.Log.Errorln("/common/downmsg Get URL Failed", err)
+		return
+	}
+	defer response.Body.Close()
+	err = os.MkdirAll(DOWNLOADFILE_PATH, os.ModePerm)
+	if err != nil {
+		logger.Log.Errorln("mkdir Failed%s\n", err)
+		return
+	}
+	file, err := os.Create(DOWNLOADFILE_PATH + fileName)
+	if err != nil {
+		logger.Log.Errorln("/common/downmsg Create Storage File Failed", err)
+	}
+	defer file.Close()
+	_, err = io.Copy(file, response.Body)
+	if err != nil {
+		logger.Log.Errorln("/common/downmsg Copy Msg Failed", err)
+	}
+	logger.Log.Infoln("/common/downmsg downing T320M new version Finished!")
 }

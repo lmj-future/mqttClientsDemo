@@ -33,4 +33,8 @@ const (
 
 	// propertyUp
 	PROPERTY_UP = "propertyUp"
+
+	//downLoad
+	DOWNLOADFILE_PATH = "./storageFile/"
+	DOWNLOADFILE_POSTFIX = ".bin"
 )
