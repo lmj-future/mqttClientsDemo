@@ -18,7 +18,7 @@ import (
 )
 
 var DeviceTimeStampMap cmap.ConcurrentMap
-var MqttMsgCounter int32 = 1
+
 
 func InitTimeStampMap() {
 	DeviceTimeStampMap = cmap.New()
@@ -194,12 +194,12 @@ func ProcUpgradeMsg(c mqtt.Client, m mqtt.Message) {
 	upgradeMsg := ParseUpgradeMsg(m.Payload())
 	if upgradeMsg.Method == "/ota/device/upgrade" {
 		devSN := replyTopic[len(replyTopic)-config.DEVICE_SN_LEN:]
-		MqttMsgCounter = 1
+		var mqttMsgCounter int32 = 1
 		downLoadSWare(upgradeMsg.Data.Url, upgradeMsg.Data.Version, devSN, func(length, downLen int64, times int) {
 			for {
-				if MqttMsgCounter == int32(times) {
+				if mqttMsgCounter == int32(times) {
 					curProgress := int(float64(downLen) / float64(length) * 100)
-					logger.Log.Infof("/common/downmsg/ current progress is =%d%%", curProgress)
+					logger.Log.Infof("/common/downmsg/ DevEUI: %v's current progress is =%d%%\n", devSN,curProgress)
 					progressMsg := ProgressMsg{
 						Id: times,
 						Params: Param{
@@ -224,7 +224,7 @@ func ProcUpgradeMsg(c mqtt.Client, m mqtt.Message) {
 							c.Publish(topic, 0, false, string(payload))
 						}
 					}
-					atomic.AddInt32(&MqttMsgCounter, 1)
+					atomic.AddInt32(&mqttMsgCounter, 1)
 					break
 				}
 			}
