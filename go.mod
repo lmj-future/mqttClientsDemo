@@ -1,6 +1,6 @@
 module github.com/lmj/mqtt-clients-demo
 
-go 1.20
+go 1.18
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3
