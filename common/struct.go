@@ -3,9 +3,10 @@ package common
 import mqtt "github.com/eclipse/paho.mqtt.golang"
 
 type MqttClientInfo struct {
-	DevSN       string
-	Client      mqtt.Client
-	Connectting bool
+	DevSN         string
+	Client        mqtt.Client
+	Connectting   bool
+	FinshedInteraction bool
 }
 
 type ModTopoInfo struct {

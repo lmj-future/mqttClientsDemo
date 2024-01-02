@@ -1,8 +1,8 @@
 package mqttclient
 
 import (
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -45,7 +45,7 @@ func connect(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOptions
 	}
 }
 func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOptions, subTopic []string,
-	wg *sync.WaitGroup, reconnect bool, timestamp string, clientState *string) {
+	reconnect bool, timestamp string, clientState *string) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -99,9 +99,9 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 			clientInfo.Connectting = false
 			// 客户端信息存入Map
 			ClientMap.Set(clientInfo.DevSN, clientInfo)
-			if wg != nil {
-				wg.Done()
-			}
+			connextSuffix := clientInfo.DevSN[len(config.DEVICE_SN_PRE+config.DEVICE_SN_MID):]
+			connectNum, _ := strconv.Atoi(connextSuffix)
+			config.DevFinshedConn <- connectNum - 1
 			break
 		}
 	}
@@ -109,7 +109,7 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 
 // MQTT client connect
 func Connect(devSN string, broker string, userName string, password string, clientId string, keepAlive time.Duration,
-	subTopic []string, wg *sync.WaitGroup, timestamp string, clientState *string) {
+	subTopic []string, timestamp string, clientState *string) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -132,7 +132,7 @@ func Connect(devSN string, broker string, userName string, password string, clie
 		Connectting: true,
 	}
 	// 开始尝试连接循环，直到连接成功
-	connectLoop(clientInfo, clientOptions, subTopic, wg, false, timestamp, clientState)
+	connectLoop(clientInfo, clientOptions, subTopic, false, timestamp, clientState)
 
 	// 启动协程，用于处理重连
 	go func() {
@@ -150,7 +150,7 @@ func Connect(devSN string, broker string, userName string, password string, clie
 					info.Connectting = true
 					// 释放连接
 					// info.Client.Disconnect(250)
-					connectLoop(info, clientOptions, subTopic, nil, true, timestamp, clientState)
+					connectLoop(info, clientOptions, subTopic, true, timestamp, clientState)
 				}
 			}
 			// 停顿两秒，避免频繁重连

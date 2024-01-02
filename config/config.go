@@ -56,6 +56,13 @@ var LOG_SIZE int
 var LOG_BACKUP_COUNT int
 var LOG_STORE string
 
+//控制消息
+var (
+	DevFinshedConn chan int
+	DevFinshedSub  chan int
+	DevIsNeedNext = true
+)
+
 func Init() *ini.File {
 	cfg, err := ini.Load("./config/conf.ini")
 	if err != nil {
@@ -158,7 +165,8 @@ func Init() *ini.File {
 	}
 
 	DEVICE_SN_LEFT_LEN = strconv.FormatInt(int64(DEVICE_SN_LEN-len(DEVICE_SN_PRE)-len(DEVICE_SN_MID)), 10)
-
+	DevFinshedSub = make(chan int, 100)
+	DevFinshedConn = make(chan int, 100)
 	return cfg
 }
 
