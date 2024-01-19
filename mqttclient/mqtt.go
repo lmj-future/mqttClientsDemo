@@ -3,6 +3,7 @@ package mqttclient
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -45,7 +46,7 @@ func connect(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOptions
 	}
 }
 func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOptions, subTopic []string,
-	wg *sync.WaitGroup, reconnect bool, timestamp string, clientState *string) {
+	wg *sync.WaitGroup, reconnect bool, timestamp string, clientState *string, ontlineDev *int32) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -62,6 +63,7 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 		if cli, err := connect(clientInfo, clientOptions, clientState); err != nil {
 			// 连接失败，释放连接
 			// cli.Disconnect(250)
+			logger.Log.Infof("连接失败[%s]", clientInfo.DevSN)
 			if reconnectCount == 0 {
 				clientInfo.Client = cli
 				// 客户端信息存入Map
@@ -100,6 +102,7 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 			// 客户端信息存入Map
 			ClientMap.Set(clientInfo.DevSN, clientInfo)
 			if wg != nil {
+				atomic.AddInt32(ontlineDev, 1)
 				wg.Done()
 			}
 			break
@@ -109,7 +112,7 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 
 // MQTT client connect
 func Connect(devSN string, broker string, userName string, password string, clientId string, keepAlive time.Duration,
-	subTopic []string, wg *sync.WaitGroup, timestamp string, clientState *string) {
+	subTopic []string, wg *sync.WaitGroup, timestamp string, clientState *string, onlineDev *int32) {
 	defer func() {
 		err := recover()
 		if err != nil {
@@ -132,7 +135,7 @@ func Connect(devSN string, broker string, userName string, password string, clie
 		Connectting: true,
 	}
 	// 开始尝试连接循环，直到连接成功
-	connectLoop(clientInfo, clientOptions, subTopic, wg, false, timestamp, clientState)
+	connectLoop(clientInfo, clientOptions, subTopic, wg, false, timestamp, clientState, onlineDev)
 
 	// 启动协程，用于处理重连
 	go func() {
@@ -150,7 +153,7 @@ func Connect(devSN string, broker string, userName string, password string, clie
 					info.Connectting = true
 					// 释放连接
 					// info.Client.Disconnect(250)
-					connectLoop(info, clientOptions, subTopic, nil, true, timestamp, clientState)
+					connectLoop(info, clientOptions, subTopic, nil, true, timestamp, clientState, onlineDev)
 				}
 			}
 			// 停顿两秒，避免频繁重连

@@ -21,6 +21,7 @@ import (
 )
 
 var clientState string = ""
+var onlineDev int32 = 0
 
 func init() {
 	config.Init()
@@ -30,17 +31,15 @@ func init() {
 	common.InitTimeStampMap()
 }
 
-func checkConnectOK(index int) {
+func checkConnectOK(index int32) {
 	if clientState == "" {
 		go func() {
 			<-time.After(time.Second)
 			checkConnectOK(index)
 		}()
 	} else if clientState == "ok" {
-		leftCount := config.DEVICE_TOTAL_COUNT - index
-		leftTime := float64((leftCount*config.MQTT_CLIENT_CONNECT_INTERVAL+
-			leftCount*1000/100*config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL)/1000) / 60
-		lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行客户端连接，大概还需要"+fmt.Sprintf("%.2f", leftTime)+"分钟"+`"`)
+		leftCount := config.DEVICE_TOTAL_COUNT - int(index)
+		lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行客户端连接，大概还需等待"+fmt.Sprintf("%v", leftCount)+"个设备上线"+`"`)
 	} else {
 		lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行客户端连接，连接失败了["+clientState+"]，请检查一下配置是否正确"+`"`)
 	}
@@ -112,65 +111,59 @@ func getClientId(userName string, password string, devSN string) string {
 	return clientId
 }
 
-func mqttConnectFirst(sig chan os.Signal, timestamp string) bool {
+
+func mqttConnectFirst(sig chan os.Signal, timestamp string, sn int) bool {
 	clientState = ""
 	isNeedWait := true
 	sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
 	wg := &sync.WaitGroup{}
-	wg.Add(config.DEVICE_TOTAL_COUNT)
-	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
-		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
-		var clientId string
-		var userName string = config.MQTT_CLIENT_USERNAME
-		var password string = config.MQTT_CLIENT_PASSWORD
-		var subTopic []string
-		if config.PRODUCT_NAME == "自定义" {
-			subTopic = getSubTopic(devSN)
-		} else {
-			for _, topic := range config.SUB_TOPIC {
-				subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, devSN))
-			}
+	wg.Add(1)
+	devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+sn)
+	var clientId string
+	var userName string = config.MQTT_CLIENT_USERNAME
+	var password string = config.MQTT_CLIENT_PASSWORD
+	var subTopic []string
+	if config.PRODUCT_NAME == "自定义" {
+		subTopic = getSubTopic(devSN)
+	} else {
+		for _, topic := range config.SUB_TOPIC {
+			subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, devSN))
 		}
-		switch config.PRODUCT_NAME {
-		case "T320M", "T320MX", "T320MX-U":
-			clientId = fmt.Sprintf("%s&%s", config.PRODUCT_KEY, devSN)
-		case "示例产品-mqtt":
-			clientId = fmt.Sprintf("%s&v5", devSN)
-			userName = fmt.Sprintf("%s&%s", config.PRODUCT_KEY, devSN)
-			password = config.DEVICE_KEY
-		case "自定义":
-			userName = getUserName(userName, devSN)
-			password = getPassword(password, devSN)
-			clientId = getClientId(userName, password, devSN)
+	}
+	switch config.PRODUCT_NAME {
+	case "T320M", "T320MX", "T320MX-U":
+		clientId = fmt.Sprintf("%s&%s", config.PRODUCT_KEY, devSN)
+	case "示例产品-mqtt":
+		clientId = fmt.Sprintf("%s&v5", devSN)
+		userName = fmt.Sprintf("%s&%s", config.PRODUCT_KEY, devSN)
+		password = config.DEVICE_KEY
+	case "自定义":
+		userName = getUserName(userName, devSN)
+		password = getPassword(password, devSN)
+		clientId = getClientId(userName, password, devSN)
+	}
+	go mqttclient.Connect(devSN, config.MQTT_CLIENT_BROKER, userName, password, clientId,
+		time.Duration(config.MQTT_CLIENT_KEEPALIVE)*time.Second, subTopic, wg, timestamp, &clientState, &onlineDev)
+	if config.DEVICE_TOTAL_COUNT > 100 {
+		// 特定序号进行数据打印
+		if onlineDev%100 == 0 {
+			checkConnectOK(onlineDev)
 		}
-		go mqttclient.Connect(devSN, config.MQTT_CLIENT_BROKER, userName, password, clientId,
-			time.Duration(config.MQTT_CLIENT_KEEPALIVE)*time.Second, subTopic, wg, timestamp, &clientState)
-		if config.DEVICE_TOTAL_COUNT > 100 {
-			// 每100个设备连接完后，停顿MQTT_CLIENT_CONNECT_PER_100_INTERVAL秒，再继续下一组100个设备的连接，防止瞬时连接量太大
-			if i%100 == 0 {
-				checkConnectOK(i)
-				<-time.After(time.Second * time.Duration(config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL))
-			}
-		} else {
-			if i == 0 {
-				checkConnectOK(i)
-			}
+	} else {
+		if onlineDev == 0 {
+			checkConnectOK(onlineDev)
 		}
-		<-time.After(time.Millisecond * time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL))
-
-		// 如果此次开始被停止了，那么就要停止此次开始所做的事情
-		if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
-			stop(sig)
-			isNeedWait = false
-			break
-		}
-		// 监听程序退出
-		select {
-		case <-sig:
-			exit()
-		default:
-			continue
-		}
+	}
+	// 如果此次开始被停止了，那么就要停止此次开始所做的事情
+	if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
+		stop(sig)
+		isNeedWait = false
+	}
+	// 监听程序退出
+	select {
+	case <-sig:
+		exit()
+	default:
 	}
 	if isNeedWait {
 		wg.Wait()
@@ -179,119 +172,64 @@ func mqttConnectFirst(sig chan os.Signal, timestamp string) bool {
 	return false
 }
 
-func mqttSubscribeSecond(sig chan os.Signal, timestamp string) bool {
+//一个设备的订阅
+func mqttSubscribeSecond(sig chan os.Signal, timestamp string, sn int) bool {
 	isNeedWait := true
 	sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
-	wg := &sync.WaitGroup{}
-	wg.Add(config.DEVICE_TOTAL_COUNT)
-	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
-		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
-		var subTopic []string
-		if config.PRODUCT_NAME == "自定义" {
-			subTopic = getSubTopic(devSN)
-		} else {
-			for _, topic := range config.SUB_TOPIC {
-				subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, devSN))
-			}
-		}
-		if v, ok := mqttclient.ClientMap.Get(devSN); ok {
-			cli := v.(common.MqttClientInfo)
-			mqttclient.Subscribe(subTopic, cli.Client)
-			logger.Log.Infof("设备[%s]订阅[%+v]成功", cli.DevSN, subTopic)
-			<-time.After(time.Millisecond * time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL))
-		}
-		if config.DEVICE_TOTAL_COUNT > 100 {
-			// 每100个设备交互完后，停顿MQTT_CLIENT_CONNECT_PER_100_INTERVAL秒，再继续下一组100个设备的连接，防止瞬时连接量太大
-			if i%100 == 0 {
-				leftCount := config.DEVICE_TOTAL_COUNT - i
-				leftTime := float64((leftCount*config.MQTT_CLIENT_CONNECT_INTERVAL+
-					leftCount*1000/100*config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL)/1000) / 60
-				lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行设备订阅topic，大概还需要"+fmt.Sprintf("%.2f", leftTime)+"分钟"+`"`)
-				<-time.After(time.Second * time.Duration(config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL))
-			}
-		} else {
-			if i == 0 {
-				leftCount := config.DEVICE_TOTAL_COUNT - i
-				leftTime := float64((leftCount*config.MQTT_CLIENT_CONNECT_INTERVAL)/1000) / 60
-				lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行设备订阅topic，大概还需要"+fmt.Sprintf("%.2f", leftTime)+"分钟"+`"`)
-			}
-		}
-		wg.Done()
-
-		// 如果此次开始被停止了，那么就要停止此次开始所做的事情
-		if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
-			stop(sig)
-			isNeedWait = false
-			break
-		}
-
-		// 监听程序退出
-		select {
-		case <-sig:
-			exit()
-		default:
-			continue
+	devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+sn)
+	var subTopic []string
+	if config.PRODUCT_NAME == "自定义" {
+		subTopic = getSubTopic(devSN)
+	} else {
+		for _, topic := range config.SUB_TOPIC {
+			subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, devSN))
 		}
 	}
-	if isNeedWait {
-		wg.Wait()
-		return true
+	if v, ok := mqttclient.ClientMap.Get(devSN); ok {
+		cli := v.(common.MqttClientInfo)
+		mqttclient.Subscribe(subTopic, cli.Client)
+		logger.Log.Infof("设备[%s]订阅[%+v]成功", cli.DevSN, subTopic)
 	}
-	return false
+	// 如果此次开始被停止了，那么就要停止此次开始所做的事情
+	if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
+		stop(sig)
+		isNeedWait = false
+	}
+	// 监听程序退出
+	select {
+	case <-sig:
+		exit()
+	default:
+	}
+	return isNeedWait
 }
 
-func clientBusinessThird(sig chan os.Signal, timestamp string) bool {
+//一个设备的数据交互
+func clientBusinessThird(sig chan os.Signal, timestamp string, sn int, wg *sync.WaitGroup) bool {
 	isNeedWait := true
 	sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
-	wg := &sync.WaitGroup{}
-	wg.Add(config.DEVICE_TOTAL_COUNT)
-	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
-		devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
-		if v, ok := mqttclient.ClientMap.Get(devSN); ok {
-			cli := v.(common.MqttClientInfo)
-			go common.UpRawWhenConnect(cli)
-			logger.Log.Infof("设备[%s]正在进行交互", cli.DevSN)
-			<-time.After(time.Millisecond * time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL))
-		}
-		if config.DEVICE_TOTAL_COUNT > 100 {
-			// 每100个设备交互完后，停顿MQTT_CLIENT_CONNECT_PER_100_INTERVAL秒，再继续下一组100个设备的连接，防止瞬时连接量太大
-			if i%100 == 0 {
-				leftCount := config.DEVICE_TOTAL_COUNT - i
-				leftTime := float64((leftCount*config.MQTT_CLIENT_CONNECT_INTERVAL+
-					leftCount*1000/100*config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL)/1000) / 60
-				lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行设备数据交互，大概还需要"+fmt.Sprintf("%.2f", leftTime)+"分钟"+`"`)
-				<-time.After(time.Second * time.Duration(config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL))
-			}
-		} else {
-			if i == 0 {
-				leftCount := config.DEVICE_TOTAL_COUNT - i
-				leftTime := float64((leftCount*config.MQTT_CLIENT_CONNECT_INTERVAL)/1000) / 60
-				lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行设备数据交互，大概还需要"+fmt.Sprintf("%.2f", leftTime)+"分钟"+`"`)
-			}
-		}
-		wg.Done()
-
-		// 如果此次开始被停止了，那么就要停止此次开始所做的事情
-		if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
-			stop(sig)
-			isNeedWait = false
-			break
-		}
-		// 监听程序退出
-		select {
-		case <-sig:
-			exit()
-		default:
-			continue
-		}
+	devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+sn)
+	if v, ok := mqttclient.ClientMap.Get(devSN); ok {
+		cli := v.(common.MqttClientInfo)
+		go common.UpRawWhenConnect(cli)
+		logger.Log.Infof("设备[%s]正在进行交互", cli.DevSN)
 	}
-	if isNeedWait {
-		wg.Wait()
-		return true
+	// 如果此次开始被停止了，那么就要停止此次开始所做的事情
+	if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
+		stop(sig)
+		isNeedWait = false
 	}
-	return false
+	// 监听程序退出
+	select {
+	case <-sig:
+		exit()
+	default:
+	}
+	wg.Done()
+	return isNeedWait
 }
 
+//数据定时上报异步
 func clientTickerData(sig chan os.Signal, timestamp string) {
 	ticker := time.NewTicker(time.Duration(config.PPS_PER) * time.Second)
 	go func() {
@@ -307,13 +245,15 @@ func clientTickerData(sig chan os.Signal, timestamp string) {
 				go func() {
 					sufFix := "%0" + config.DEVICE_SN_LEFT_LEN + "d"
 					for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
-						devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+i)
-						if v, ok := mqttclient.ClientMap.Get(devSN); ok {
-							cli := v.(common.MqttClientInfo)
-							timeSleep := time.Second * time.Duration(config.PPS_PER) / time.Duration(config.DEVICE_TOTAL_COUNT)
-							go common.UpRawAfterConnect(cli, timeSleep)
-							<-time.After(timeSleep)
-						}
+						go func(index int) {
+							devSN := fmt.Sprintf(config.DEVICE_SN_PRE+config.DEVICE_SN_MID+sufFix, config.DEVICE_SN_SUF_START_BY+index)
+							if v, ok := mqttclient.ClientMap.Get(devSN); ok {
+								cli := v.(common.MqttClientInfo)
+								timeSleep := time.Second * time.Duration(config.PPS_PER) / time.Duration(config.DEVICE_TOTAL_COUNT)
+								go common.UpRawAfterConnect(cli, timeSleep)
+								<-time.After(timeSleep)
+							}
+						}(i)
 					}
 				}()
 			// 监听程序退出
@@ -328,7 +268,7 @@ func clientTickerData(sig chan os.Signal, timestamp string) {
 }
 
 func checkAndDisplay(timestamp string) {
-	<-time.After(3 * time.Second)
+	//<-time.After(3 * time.Second)
 	for {
 		// 如果此次开始被停止了，那么就要停止此次开始所做的事情
 		if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
@@ -355,7 +295,7 @@ func checkAndDisplay(timestamp string) {
 		lorcaui.Eval(`"DEVICE_ONLINE_COUNT"`, `"`+fmt.Sprintf("%d", onlineCount)+`"`)
 		lorcaui.Eval(`"DEVICE_OFFLINE_COUNT"`, `"`+fmt.Sprintf("%d", offlineCount)+`"`)
 		lorcaui.Eval(`"TOTAL_PPS"`, `"`+fmt.Sprintf("%.2f", totalPps)+`"`)
-		<-time.After(10 * time.Second)
+		<-time.After(3 * time.Second)
 	}
 }
 
@@ -434,38 +374,37 @@ func exit() {
 }
 
 func do(sig chan os.Signal, timestamp string) {
-	// 1、先进行MQTT连接
-	isNeedNext := mqttConnectFirst(sig, timestamp)
-
-	// 2、再进行MQTT消息订阅
-	if isNeedNext {
-		<-time.After(time.Second * 3)
-		if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
-			isNeedNext = mqttSubscribeSecond(sig, timestamp)
-		}
+	wgForBusiness :=  &sync.WaitGroup{} 
+	wgForBusiness.Add(config.DEVICE_TOTAL_COUNT)
+	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
+		go func(index int) {
+			//1、先进行MQTT连接
+			isNeedNext := mqttConnectFirst(sig, timestamp, index)
+			if isNeedNext {
+				//其次完成订阅
+				if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
+					isNeedNext = mqttSubscribeSecond(sig, timestamp, index)
+				}
+			}
+			if isNeedNext { 
+				//完成数据交互
+				if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
+					isNeedNext = clientBusinessThird(sig, timestamp, index, wgForBusiness)
+				}
+			}
+			if isNeedNext {
+				if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
+					clientTickerData(sig, timestamp)
+				}
+			}
+		}(i)
 	}
-
-	// 3、然后进行数据交互
-	if isNeedNext {
-		<-time.After(time.Second * 3)
-		if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
-			isNeedNext = clientBusinessThird(sig, timestamp)
-			lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
-		}
-	}
-
-	// 4、启动定时器，对数据进行定时上送
-	if isNeedNext {
-		<-time.After(time.Second * 3)
-		if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
-			clientTickerData(sig, timestamp)
-		}
-	}
-
-	// 5、展示一些数据
+	// 展示一些数据
 	if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
 		go checkAndDisplay(timestamp)
 	}
+	wgForBusiness.Wait()  //等待数据交互后显示客户端情况
+	lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
 }
 
 // 主程序
