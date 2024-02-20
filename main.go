@@ -39,7 +39,9 @@ func checkConnectOK(index int32) {
 		}()
 	} else if clientState == "ok" {
 		leftCount := config.DEVICE_TOTAL_COUNT - int(index)
-		lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行客户端连接，大概还需等待"+fmt.Sprintf("%v", leftCount)+"个设备上线"+`"`)
+		if int(onlineDev) != config.DEVICE_TOTAL_COUNT {
+			lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行客户端连接，大概还需等待"+fmt.Sprintf("%v", leftCount)+"个设备上线"+`"`)
+		}
 	} else {
 		lorcaui.Eval(`"CLIENT_STATE"`, `"`+"正在进行客户端连接，连接失败了["+clientState+"]，请检查一下配置是否正确"+`"`)
 	}
@@ -110,7 +112,6 @@ func getClientId(userName string, password string, devSN string) string {
 	}
 	return clientId
 }
-
 
 func mqttConnectFirst(sig chan os.Signal, timestamp string, sn int) bool {
 	clientState = ""
@@ -374,7 +375,7 @@ func exit() {
 }
 
 func do(sig chan os.Signal, timestamp string) {
-	wgForBusiness :=  &sync.WaitGroup{} 
+	wgForBusiness := &sync.WaitGroup{}
 	wgForBusiness.Add(config.DEVICE_TOTAL_COUNT)
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
 		go func(index int) {
@@ -386,7 +387,7 @@ func do(sig chan os.Signal, timestamp string) {
 					isNeedNext = mqttSubscribeSecond(sig, timestamp, index)
 				}
 			}
-			if isNeedNext { 
+			if isNeedNext {
 				//完成数据交互
 				if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
 					isNeedNext = clientBusinessThird(sig, timestamp, index, wgForBusiness)
@@ -403,7 +404,18 @@ func do(sig chan os.Signal, timestamp string) {
 	if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
 		go checkAndDisplay(timestamp)
 	}
-	wgForBusiness.Wait()  //等待数据交互后显示客户端情况
+	//保证退出
+	go func() {
+		for {
+			select {
+			case <-sig:
+				exit()
+			default:
+				time.Sleep(time.Second)
+			}
+		}
+	}()
+	wgForBusiness.Wait() //等待数据交互后显示客户端情况
 	lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
 }
 
@@ -411,7 +423,7 @@ func do(sig chan os.Signal, timestamp string) {
 func main() {
 	fmt.Println(`
 ===================================================
-:: MQTT CLIENTS DEMO ::         (v1.0.2)
+:: MQTT CLIENTS DEMO ::         (v1.0.4)
 ===================================================
 	`)
 	logger.Log.Warnln("========================Start======================")
