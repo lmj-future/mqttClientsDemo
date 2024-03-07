@@ -145,16 +145,6 @@ func mqttConnectFirst(sig chan os.Signal, timestamp string, sn int) bool {
 	}
 	go mqttclient.Connect(devSN, config.MQTT_CLIENT_BROKER, userName, password, clientId,
 		time.Duration(config.MQTT_CLIENT_KEEPALIVE)*time.Second, subTopic, wg, timestamp, &clientState, &onlineDev)
-	if config.DEVICE_TOTAL_COUNT > 100 {
-		// 特定序号进行数据打印
-		if onlineDev%100 == 0 {
-			checkConnectOK(onlineDev)
-		}
-	} else {
-		if onlineDev == 0 {
-			checkConnectOK(onlineDev)
-		}
-	}
 	// 如果此次开始被停止了，那么就要停止此次开始所做的事情
 	if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
 		stop(sig)
@@ -296,7 +286,7 @@ func checkAndDisplay(timestamp string) {
 		lorcaui.Eval(`"DEVICE_ONLINE_COUNT"`, `"`+fmt.Sprintf("%d", onlineCount)+`"`)
 		lorcaui.Eval(`"DEVICE_OFFLINE_COUNT"`, `"`+fmt.Sprintf("%d", offlineCount)+`"`)
 		lorcaui.Eval(`"TOTAL_PPS"`, `"`+fmt.Sprintf("%.2f", totalPps)+`"`)
-		<-time.After(3 * time.Second)
+		<-time.After(2 * time.Second)
 	}
 }
 
@@ -377,6 +367,10 @@ func exit() {
 func do(sig chan os.Signal, timestamp string) {
 	wgForBusiness := &sync.WaitGroup{}
 	wgForBusiness.Add(config.DEVICE_TOTAL_COUNT)
+	// 展示一些数据
+	if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
+		go checkAndDisplay(timestamp)
+	}
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
 		go func(index int) {
 			//1、先进行MQTT连接
@@ -399,11 +393,19 @@ func do(sig chan os.Signal, timestamp string) {
 				}
 			}
 		}(i)
+		if config.DEVICE_TOTAL_COUNT > 100 {
+			// 特定序号进行数据打印
+			if i%100 == 0 {
+				checkConnectOK(onlineDev)
+				<-time.After(time.Second * time.Duration(config.MQTT_CLIENT_CONNECT_PER_100_INTERVAL))
+			}
+		} else {
+			if i == 0 {
+				checkConnectOK(onlineDev)
+			}
+		}
 	}
-	// 展示一些数据
-	if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
-		go checkAndDisplay(timestamp)
-	}
+
 	//保证退出
 	go func() {
 		for {
