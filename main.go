@@ -259,13 +259,14 @@ func clientTickerData(sig chan os.Signal, timestamp string) {
 }
 
 func checkAndDisplay(timestamp string) {
-	//<-time.After(3 * time.Second)
 	for {
 		// 如果此次开始被停止了，那么就要停止此次开始所做的事情
 		if v, ok := mqttclient.ClientStopMap.Get(timestamp); ok && v.(bool) {
+			lorcaui.Eval(`"DEVICE_ONLINE_COUNT"`, `"`+fmt.Sprintf("%d", 0)+`"`)
+			lorcaui.Eval(`"DEVICE_OFFLINE_COUNT"`, `"`+fmt.Sprintf("%d", 0)+`"`)
+			lorcaui.Eval(`"TOTAL_PPS"`, `"`+fmt.Sprintf("%.2f", 0.00)+`"`)
 			break
 		}
-
 		unconnCli := []string{}
 		for i := range mqttclient.ClientMap.IterBuffered() {
 			cli := i.Val.(common.MqttClientInfo)
@@ -292,7 +293,7 @@ func checkAndDisplay(timestamp string) {
 
 func stop(sig chan os.Signal) {
 	logger.Log.Infoln("客户端触发停止，正在销毁资源！！！请等待...")
-	<-time.After(3 * time.Second)
+	<-time.After(2 * time.Second)
 	clientMap := cmap.New()
 	for i := range mqttclient.ClientMap.IterBuffered() {
 		clientMap.Set(i.Key, i.Val)
@@ -339,20 +340,22 @@ func exit() {
 	wg := &sync.WaitGroup{}
 	wg.Add(clientMap.Count())
 	for i := range clientMap.IterBuffered() {
-		cli := i.Val.(common.MqttClientInfo)
-		var subTopic []string
-		if config.PRODUCT_NAME == "自定义" {
-			subTopic = getSubTopic(cli.DevSN)
-		} else {
-			for _, topic := range config.SUB_TOPIC {
-				subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, cli.DevSN))
+		go func(info cmap.Tuple) {
+			cli := info.Val.(common.MqttClientInfo)
+			var subTopic []string
+			if config.PRODUCT_NAME == "自定义" {
+				subTopic = getSubTopic(cli.DevSN)
+			} else {
+				for _, topic := range config.SUB_TOPIC {
+					subTopic = append(subTopic, fmt.Sprintf(topic, config.PRODUCT_KEY, cli.DevSN))
+				}
 			}
-		}
-		cli.Client.Unsubscribe(subTopic...)
-		cli.Client.Disconnect(uint(config.MQTT_CLIENT_CONNECT_INTERVAL))
-		logger.Log.Infoln("进程退出，关闭MQTT连接: ", cli.DevSN)
-		<-time.After(time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL) * time.Microsecond)
-		wg.Done()
+			cli.Client.Unsubscribe(subTopic...)
+			cli.Client.Disconnect(uint(config.MQTT_CLIENT_CONNECT_INTERVAL))
+			logger.Log.Infoln("进程退出，关闭MQTT连接: ", cli.DevSN)
+			<-time.After(time.Duration(config.MQTT_CLIENT_CONNECT_INTERVAL) * time.Microsecond)
+			wg.Done()
+		}(i)
 	}
 	wg.Wait()
 	logger.Log.Warnln("========================Exit=======================")
@@ -371,6 +374,17 @@ func do(sig chan os.Signal, timestamp string) {
 	if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
 		go checkAndDisplay(timestamp)
 	}
+	//保证退出
+	go func() {
+		for {
+			select {
+			case <-sig:
+				exit()
+			default:
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+	}()
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
 		go func(index int) {
 			//1、先进行MQTT连接
@@ -406,17 +420,6 @@ func do(sig chan os.Signal, timestamp string) {
 		}
 	}
 
-	//保证退出
-	go func() {
-		for {
-			select {
-			case <-sig:
-				exit()
-			default:
-				time.Sleep(time.Second)
-			}
-		}
-	}()
 	wgForBusiness.Wait() //等待数据交互后显示客户端情况
 	lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
 }

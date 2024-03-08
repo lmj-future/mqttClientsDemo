@@ -102,7 +102,9 @@ func connectLoop(clientInfo common.MqttClientInfo, clientOptions *mqtt.ClientOpt
 			// 客户端信息存入Map
 			ClientMap.Set(clientInfo.DevSN, clientInfo)
 			//连接完成后数据交互
-			go common.UpRawWhenConnect(clientInfo)
+			if reconnect {
+				go common.UpRawWhenConnect(clientInfo)
+			}
 			if wg != nil {
 				atomic.AddInt32(ontlineDev, 1)
 				wg.Done()
