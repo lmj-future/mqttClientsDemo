@@ -1,5 +1,5 @@
 
-document.title = "MQTT CLIENTS DEMO v1.0.2"
+document.title = "MQTT CLIENTS DEMO v1.0.4"
 var timestamp = Date.now().toString();
 var config = {
     PPS: 7,
