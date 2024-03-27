@@ -385,6 +385,11 @@ func do(sig chan os.Signal, timestamp string) {
 			}
 		}
 	}()
+	//定时数据上报
+	go func() {
+		time.Sleep(time.Second)
+		clientTickerData(sig, timestamp)
+	}()
 	for i := 0; i < config.DEVICE_TOTAL_COUNT; i++ {
 		go func(index int) {
 			//1、先进行MQTT连接
@@ -398,12 +403,7 @@ func do(sig chan os.Signal, timestamp string) {
 			if isNeedNext {
 				//完成数据交互
 				if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
-					isNeedNext = clientBusinessThird(sig, timestamp, index, wgForBusiness)
-				}
-			}
-			if isNeedNext {
-				if _, ok := mqttclient.ClientStopMap.Get(timestamp); ok {
-					clientTickerData(sig, timestamp)
+					clientBusinessThird(sig, timestamp, index, wgForBusiness)
 				}
 			}
 		}(i)
@@ -419,7 +419,6 @@ func do(sig chan os.Signal, timestamp string) {
 			}
 		}
 	}
-
 	wgForBusiness.Wait() //等待数据交互后显示客户端情况
 	lorcaui.Eval(`"CLIENT_STATE"`, `"客户端运行中..."`)
 }
